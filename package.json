@@ -1,0 +1,34 @@
+{
+  "name": "native-task-router",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm 里续上",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "postinstall": "install-electron",
+    "check": "tsc --noEmit && bash scripts/shell-multibyte.guard.sh",
+    "test": "npm run -s check && npm run -s providers:contracts && npm run -s iterm:contracts && npm run -s open:contracts && npm run -s router:contracts && npm run -s route-eval:contracts",
+    "jev": "node src/layers/cli.ts",
+    "entry": "electron entry/main.cjs",
+    "providers:contracts": "node scripts/layers-providers.contracts.mjs",
+    "iterm:contracts": "node scripts/layers-iterm.contracts.mjs",
+    "open:contracts": "node scripts/layers-open.contracts.mjs",
+    "router:contracts": "node scripts/route-eval/contracts-router-v2.mjs",
+    "entry:ux": "node scripts/entry-ux.live.mjs",
+    "iterm:live": "node scripts/layers-iterm.live.mjs",
+    "open:live": "node scripts/layers-open.live.mjs",
+    "route-eval:contracts": "node scripts/route-eval/contracts.mjs && node scripts/route-eval/contracts-v2.mjs",
+    "route-eval:mine": "node scripts/route-eval/mine.mjs",
+    "route-eval:mine2": "node scripts/route-eval/mine2.mjs",
+    "route-eval:audit": "node scripts/route-eval/audit.mjs",
+    "route-eval:run": "node scripts/route-eval/eval.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "electron": "^44.4.5",
+    "typescript": "^7.0.2"
+  }
+}
