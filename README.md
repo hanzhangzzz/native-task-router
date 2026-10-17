@@ -90,6 +90,8 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 命令行也能做同样的事：`npm run jev -- open "<一句话>"` 真实送达，`--pick claude:<会话id>` 指定目标，`--new claude|codex` 直接新建。
 
+新建的会话放在 `~/JevTasks/<这句话的简称>-<编号>` 里；设置 `JEV_TASKS_DIR` 可以换一个目录。
+
 ## 它怎么工作
 
 ```

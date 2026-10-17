@@ -81,6 +81,8 @@ The input box follows your macOS language (English or Chinese); set `JEV_LANG=en
 
 The CLI can do the same: `npm run jev -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, and `--new claude|codex` starts a new session.
 
+New sessions go to `~/JevTasks/<short name>-<number>`; set `JEV_TASKS_DIR` to use another folder.
+
 ## How it works
 
 ```
