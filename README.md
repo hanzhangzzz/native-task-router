@@ -2,9 +2,9 @@
 
 **按一个快捷键，说一句话，接着上次那个 AI 会话干活。**
 
-**[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [▶ 30 秒演示](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4) · [English](README.en.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [English](README.en.md) · macOS + iTerm2 · Claude Code / Codex · MIT
 
-[![30 秒演示：说一句话，上次的会话带着完整上下文续上](docs/images/demo-poster.jpg)](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4)
+https://github.com/user-attachments/assets/684fab3c-b819-46d8-9556-9d4d585ee505
 
 **新开一个 AI 会话，等于让它失忆。** 最完整的上下文就在原生会话记录里，`claude -r` 和 `codex resume` 能把它原样恢复。难的是记住它在哪。
 

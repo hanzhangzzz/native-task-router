@@ -2,9 +2,9 @@
 
 **Press a hotkey, say one sentence, and pick up the AI session you left off in.**
 
-**[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [▶ 30-second demo](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4) · [中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
 
-[![30-second demo: say one sentence, the old session resumes with full context](docs/images/demo-poster.jpg)](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4)
+https://github.com/user-attachments/assets/684fab3c-b819-46d8-9556-9d4d585ee505
 
 **A fresh AI session starts with amnesia.** The most complete context lives in the native session log, and `claude -r` / `codex resume` restore it exactly. The hard part is remembering where that session is.
 
