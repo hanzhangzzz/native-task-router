@@ -4,7 +4,7 @@
 
 **[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
 
-https://github.com/user-attachments/assets/684fab3c-b819-46d8-9556-9d4d585ee505
+https://github.com/user-attachments/assets/452dcc6b-ce93-49bc-bbd7-7a03b07bc4b4
 
 **A fresh AI session starts with amnesia.** The most complete context lives in the native session log, and `claude -r` / `codex resume` restore it exactly. The hard part is remembering where that session is.
 
