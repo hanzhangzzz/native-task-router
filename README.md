@@ -4,7 +4,7 @@
 
 **[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [English](README.en.md) · macOS + iTerm2 · Claude Code / Codex · MIT
 
-https://github.com/user-attachments/assets/684fab3c-b819-46d8-9556-9d4d585ee505
+https://github.com/user-attachments/assets/49388d4e-e07b-49d3-ab77-c110e12bdafe
 
 **新开一个 AI 会话，等于让它失忆。** 最完整的上下文就在原生会话记录里，`claude -r` 和 `codex resume` 能把它原样恢复。难的是记住它在哪。
 
