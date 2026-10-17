@@ -1,0 +1,61 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>修改快捷键</title>
+<style>
+  body { margin: 0; padding: 22px 24px; font: 14px -apple-system, "PingFang SC", sans-serif; color: #222; background: #f6f6f7; }
+  @media (prefers-color-scheme: dark) { body { color: #eee; background: #2a2a2d; } #key { background: #1e1e20; border-color: #555; } }
+  h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+  #key { height: 52px; border: 1.5px dashed #999; border-radius: 10px; display: flex; align-items: center; justify-content: center;
+         font-size: 24px; letter-spacing: 2px; background: #fff; outline: none; }
+  #key:focus { border-color: #3a5bd9; border-style: solid; }
+  #msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: #777; }
+  #msg.err { color: #d33; } #msg.ok { color: #2a8a3a; }
+  .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  button { font: inherit; padding: 5px 14px; border-radius: 6px; border: 1px solid #aaa; background: transparent; color: inherit; }
+  button.primary { background: #3a5bd9; border-color: #3a5bd9; color: #fff; }
+  button:disabled { opacity: .45; }
+</style>
+<h1>按下新的快捷键组合</h1>
+<div id="key" tabindex="0"></div>
+<div id="msg"></div>
+<div class="row"><button id="cancel">关闭</button><button id="save" class="primary" disabled>保存</button></div>
+<script>
+  const keyEl = document.getElementById('key'), msg = document.getElementById('msg'), save = document.getElementById('save');
+  let pending = null;
+  const say = (t, cls) => { msg.textContent = t; msg.className = cls || ''; };
+  const pretty = (a) => a.replace(/Command\+/g, '⌘').replace(/Control\+/g, '⌃').replace(/Alt\+/g, '⌥').replace(/Shift\+/g, '⇧');
+  // KeyboardEvent.code → Electron accelerator 键名
+  const keyName = (code) => {
+    if (/^Key[A-Z]$/.test(code)) return code.slice(3);
+    if (/^Digit[0-9]$/.test(code)) return code.slice(5);
+    if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code;
+    const map = { Space: 'Space', Enter: 'Enter', Tab: 'Tab', Backquote: '`', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']',
+      Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' };
+    return map[code] || null;
+  };
+  window.jev.getHotkey().then((h) => {
+    keyEl.textContent = h.pretty;
+    say(h.fromEnv ? '当前由环境变量 JEV_HOTKEY 指定，这里保存的设置要在去掉它后才生效' : '点上面的框，然后按下想用的组合键');
+  });
+  keyEl.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey) return window.close();
+    const k = keyName(e.code);
+    if (!k) { say('按住修饰键（⌘ ⌃ ⌥ ⇧），再按一个字母、数字、空格或 F 键'); return; }
+    const mods = [e.metaKey && 'Command', e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean);
+    if (!mods.length && !/^F\d+$/.test(k)) { say('至少要带一个修饰键（⌘ ⌃ ⌥ ⇧），免得和平时打字冲突', 'err'); return; }
+    pending = [...mods, k].join('+');
+    keyEl.textContent = pretty(pending);
+    save.disabled = false;
+    say('按"保存"生效');
+  });
+  save.addEventListener('click', async () => {
+    if (!pending) return;
+    const r = await window.jev.setHotkey(pending);
+    if (r.ok) { say(`已改为 ${r.pretty}`, 'ok'); save.disabled = true; setTimeout(() => window.close(), 900); }
+    else say(r.error, 'err');
+  });
+  document.getElementById('cancel').addEventListener('click', () => window.close());
+  keyEl.focus();
+</script>

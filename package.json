@@ -1,6 +1,6 @@
 {
   "name": "native-task-router",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm 里续上",
@@ -24,11 +24,49 @@
     "route-eval:mine": "node scripts/route-eval/mine.mjs",
     "route-eval:mine2": "node scripts/route-eval/mine2.mjs",
     "route-eval:audit": "node scripts/route-eval/audit.mjs",
-    "route-eval:run": "node scripts/route-eval/eval.mjs"
+    "route-eval:run": "node scripts/route-eval/eval.mjs",
+    "dist": "electron-builder --mac dmg --arm64"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
     "typescript": "^7.0.2"
+  },
+  "main": "entry/main.cjs",
+  "author": "huajuan404",
+  "build": {
+    "appId": "dev.nativetaskrouter.app",
+    "productName": "Native Task Router",
+    "asar": false,
+    "files": [
+      "entry/**",
+      "src/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "icon": "build/icon.png",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "用来读取你唤起输入框时正在看的 iTerm 标签页，并把这句话送进对应的 Claude Code / Codex 会话。"
+      }
+    },
+    "dmg": {
+      "title": "Native Task Router"
+    },
+    "afterPack": "build/adhoc-sign.cjs"
   }
 }

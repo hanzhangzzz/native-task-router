@@ -2,7 +2,9 @@
 
 **Press a hotkey, say one sentence, and pick up the AI session you left off in.**
 
-[中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [▶ 30-second demo](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4) · [中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+
+[![30-second demo: say one sentence, the old session resumes with full context](docs/images/demo-poster.jpg)](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4)
 
 **A fresh AI session starts with amnesia.** The most complete context lives in the native session log, and `claude -r` / `codex resume` restore it exactly. The hard part is remembering where that session is.
 
@@ -36,7 +38,16 @@ npm run jev -- route "add a per-user quota to the rate limiter"
 
 **It doesn't compete with Claude Code or Codex.** It runs no agent, hosts no terminal, and never approves anything for you. It only decides where a sentence should go. The better they get, the more useful it gets, and the routing model itself is swappable.
 
-## Quick start
+## Download
+
+1. Download `Native-Task-Router-<version>-arm64.dmg` from [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) and drag the app into Applications. Apple silicon only for now.
+2. **macOS blocks the first launch**: the app is not notarized (the author has no Developer ID). Open System Settings → Privacy & Security and click "Open Anyway" near the bottom, or run `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`.
+3. It then lives in the menu bar (the `›_` icon) and starts at login by default. Press **Control+Option+Space** to open the input box; the menu lets you change the hotkey, turn off start-at-login, or quit.
+4. On first use, macOS may ask whether it may control iTerm and System Events. Allow it: that's how it finds the tab you're looking at and types into it.
+
+You still need iTerm2 and a logged-in Claude Code (`claude`, used for routing); resuming Codex sessions needs a logged-in `codex`.
+
+## Run from source
 
 **Requirements**: macOS, [iTerm2](https://iterm2.com), Node.js ≥ 24 (tested on 25.5), and a logged-in [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on PATH). Resuming Codex sessions also needs a logged-in `codex`.
 

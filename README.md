@@ -2,7 +2,9 @@
 
 **按一个快捷键，说一句话，接着上次那个 AI 会话干活。**
 
-[English](README.en.md) · 适用于 macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [▶ 30 秒演示](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4) · [English](README.en.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+
+[![30 秒演示：说一句话，上次的会话带着完整上下文续上](docs/images/demo-poster.jpg)](https://github.com/hanzhangzzz/native-task-router/releases/download/v0.1.0/native-task-router-launch.mp4)
 
 **新开一个 AI 会话，等于让它失忆。** 最完整的上下文就在原生会话记录里，`claude -r` 和 `codex resume` 能把它原样恢复。难的是记住它在哪。
 
@@ -36,7 +38,16 @@ npm run jev -- route "限流那块再加一个按用户维度的配额"
 
 **它不和 Claude Code、Codex 抢饭碗。** 不跑 Agent，不托管终端，不替你批审批，只负责"这句话该去哪"。它们越强，它越好用；判断去处的路由模型也可以换。
 
-## 快速开始
+## 下载安装
+
+1. 从 [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) 下载 `Native-Task-Router-<版本>-arm64.dmg`，把应用拖进"应用程序"。目前只有 Apple 芯片版本。
+2. **第一次打开会被 macOS 拦下**：应用没有经过苹果公证（作者没有开发者证书）。打开"系统设置 → 隐私与安全性"，在页面下方点"仍要打开"。也可以在终端执行 `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`。
+3. 打开后它常驻在菜单栏（`›_` 图标），默认开机自动启动。按 **Control+Option+Space** 唤起输入框；菜单里可以改快捷键、关掉开机启动、退出。
+4. 第一次使用时，macOS 可能会询问是否允许它控制 iTerm 和"系统事件"，点允许：它要据此找到你正在看的标签页，并把话写进去。
+
+同样需要：iTerm2、已登录的 Claude Code（`claude`，用来判断去处）；续 Codex 会话需要已登录的 `codex`。
+
+## 从源码运行
 
 **前置条件**：macOS、[iTerm2](https://iterm2.com)、Node.js ≥ 24（已在 25.5 上测试）、已登录的 [Claude Code](https://docs.claude.com/en/docs/claude-code)（`claude` 在 PATH 里）。要续 Codex 会话，还需要已登录的 `codex`。
 

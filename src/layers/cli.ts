@@ -9,9 +9,13 @@ import { interimRouter } from './router/interim.ts';
 import { createRouterV2 } from './router/v2.ts';
 import { guarded } from './guard.ts';
 import { entryLogPath, open, readHistory, readPrevious } from './open.ts';
-import type { OpenOutcome, ProviderId, Router, SessionCard } from './types.ts';
+import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './types.ts';
 
-const providers = [claude, codex];
+// JEV_ONLY_UNDER=<目录>：只路由这个目录下的会话（演示、录屏、教程用，避免真实会话出镜）
+const onlyUnder = process.env.JEV_ONLY_UNDER ? process.env.JEV_ONLY_UNDER.replace(/\/+$/, '') + '/' : null;
+const providers: Provider[] = [claude, codex].map((p) =>
+  onlyUnder ? { ...p, listSessions: async () => (await p.listSessions()).filter((c) => (c.cwd + '/').startsWith(onlyUnder)) } : p,
+);
 
 /** 默认 Router v2（TE-4b 冻结策略，经本机 `claude -p`）；JEV_ROUTER=interim 退回过渡路由（需要 OpenRouter key）。 */
 async function pickRouter(): Promise<Router> {
