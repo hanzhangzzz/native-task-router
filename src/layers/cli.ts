@@ -123,6 +123,7 @@ async function main(): Promise<number> {
     focusedTty,
     windowId: win ? Number(win) : undefined,
     queue: { codex: g.queue },
+    tasksRoot: process.env.JEV_TASKS_DIR || undefined,
   });
   const cards = outcome.action === 'clarify' || ('sessionId' in outcome && outcome.sessionId) ? (await Promise.all(providers.map((p) => p.listSessions()))).flat() : [];
   const card = (p: ProviderId, id: string | null) => cards.find((c) => c.provider === p && c.sessionId === id);

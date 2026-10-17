@@ -43,7 +43,7 @@ export interface OpenOptions {
   clipboard?: (text: string) => Promise<void>;
   /** 入口记录文件；缺省 $JEV_HOME|~/.jev 下的 entry-log.jsonl */
   logPath?: string;
-  /** 新建会话缺省目录根；缺省 ~/JevTasks */
+  /** 新建会话缺省目录根；缺省 ~/JevTasks（CLI 读 JEV_TASKS_DIR） */
   tasksRoot?: string;
   /** 新开视图后等待原生写出会话 id 的最长毫秒数（用于填 sessionId 与下一句的语境） */
   settleMs?: number;
