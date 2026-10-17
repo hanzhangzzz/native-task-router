@@ -84,6 +84,8 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 | ←（光标在开头） | 展开你发过的会话；选中后这句话**确定地**发过去，不经过判断 |
 | Esc | 关掉；没发出去的话，下次打开还在 |
 
+输入框的界面语言跟随 macOS（中文或英文）；`JEV_LANG=zh` 或 `en` 可以指定。
+
 ![← 展开历史会话](docs/images/entry-history.png)
 
 命令行也能做同样的事：`npm run jev -- open "<一句话>"` 真实送达，`--pick claude:<会话id>` 指定目标，`--new claude|codex` 直接新建。

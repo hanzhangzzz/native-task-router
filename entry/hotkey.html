@@ -1,7 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
-<title>修改快捷键</title>
+<title></title>
 <style>
   body { margin: 0; padding: 22px 24px; font: 14px -apple-system, "PingFang SC", sans-serif; color: #222; background: #f6f6f7; }
   @media (prefers-color-scheme: dark) { body { color: #eee; background: #2a2a2d; } #key { background: #1e1e20; border-color: #555; } }
@@ -16,13 +16,24 @@
   button.primary { background: #3a5bd9; border-color: #3a5bd9; color: #fff; }
   button:disabled { opacity: .45; }
 </style>
-<h1>按下新的快捷键组合</h1>
+<h1 id="h"></h1>
 <div id="key" tabindex="0"></div>
 <div id="msg"></div>
-<div class="row"><button id="cancel">关闭</button><button id="save" class="primary" disabled>保存</button></div>
+<div class="row"><button id="cancel"></button><button id="save" class="primary" disabled></button></div>
 <script>
   const keyEl = document.getElementById('key'), msg = document.getElementById('msg'), save = document.getElementById('save');
   let pending = null;
+  const I18N = {
+    zh: { title: '修改快捷键', h: '按下新的快捷键组合', close: '关闭', save: '保存',
+      fromEnv: '当前由环境变量 JEV_HOTKEY 指定，这里保存的设置要在去掉它后才生效', start: '点上面的框，然后按下想用的组合键',
+      needKey: '按住修饰键（⌘ ⌃ ⌥ ⇧），再按一个字母、数字、空格或 F 键', needMod: '至少要带一个修饰键（⌘ ⌃ ⌥ ⇧），免得和平时打字冲突',
+      pressSave: '按"保存"生效', saved: (k) => `已改为 ${k}` },
+    en: { title: 'Change hotkey', h: 'Press a new key combination', close: 'Close', save: 'Save',
+      fromEnv: 'JEV_HOTKEY is set in the environment; what you save here applies once it is removed', start: 'Click the box above, then press the keys you want',
+      needKey: 'Hold a modifier (⌘ ⌃ ⌥ ⇧) and press a letter, digit, Space or F-key', needMod: 'Use at least one modifier (⌘ ⌃ ⌥ ⇧) so it never fires while you type',
+      pressSave: 'Press Save to apply', saved: (k) => `Changed to ${k}` },
+  };
+  let S = I18N.zh;
   const say = (t, cls) => { msg.textContent = t; msg.className = cls || ''; };
   const pretty = (a) => a.replace(/Command\+/g, '⌘').replace(/Control\+/g, '⌃').replace(/Alt\+/g, '⌥').replace(/Shift\+/g, '⇧');
   // KeyboardEvent.code → Electron accelerator 键名
@@ -35,25 +46,28 @@
     return map[code] || null;
   };
   window.jev.getHotkey().then((h) => {
+    S = I18N[h.lang] || I18N.zh;
+    document.title = S.title; document.getElementById('h').textContent = S.h;
+    document.getElementById('cancel').textContent = S.close; save.textContent = S.save;
     keyEl.textContent = h.pretty;
-    say(h.fromEnv ? '当前由环境变量 JEV_HOTKEY 指定，这里保存的设置要在去掉它后才生效' : '点上面的框，然后按下想用的组合键');
+    say(h.fromEnv ? S.fromEnv : S.start);
   });
   keyEl.addEventListener('keydown', (e) => {
     e.preventDefault();
     if (e.key === 'Escape' && !e.metaKey && !e.ctrlKey && !e.altKey) return window.close();
     const k = keyName(e.code);
-    if (!k) { say('按住修饰键（⌘ ⌃ ⌥ ⇧），再按一个字母、数字、空格或 F 键'); return; }
+    if (!k) { say(S.needKey); return; }
     const mods = [e.metaKey && 'Command', e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift'].filter(Boolean);
-    if (!mods.length && !/^F\d+$/.test(k)) { say('至少要带一个修饰键（⌘ ⌃ ⌥ ⇧），免得和平时打字冲突', 'err'); return; }
+    if (!mods.length && !/^F\d+$/.test(k)) { say(S.needMod, 'err'); return; }
     pending = [...mods, k].join('+');
     keyEl.textContent = pretty(pending);
     save.disabled = false;
-    say('按"保存"生效');
+    say(S.pressSave);
   });
   save.addEventListener('click', async () => {
     if (!pending) return;
     const r = await window.jev.setHotkey(pending);
-    if (r.ok) { say(`已改为 ${r.pretty}`, 'ok'); save.disabled = true; setTimeout(() => window.close(), 900); }
+    if (r.ok) { say(S.saved(r.pretty), 'ok'); save.disabled = true; setTimeout(() => window.close(), 900); }
     else say(r.error, 'err');
   });
   document.getElementById('cancel').addEventListener('click', () => window.close());

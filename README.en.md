@@ -77,6 +77,8 @@ scripts/login-item.sh install            # optional: start at login; `uninstall`
 | ← (caret at start) | List sessions you've sent to before; picking one sends there **deterministically**, skipping the routing step |
 | Esc | Close; anything you haven't sent is still there next time |
 
+The input box follows your macOS language (English or Chinese); set `JEV_LANG=en` or `zh` to force one.
+
 The CLI can do the same: `npm run jev -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, and `--new claude|codex` starts a new session.
 
 ## How it works
@@ -126,6 +128,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 - Claude Code keeps 30 days of history by default, so older sessions can't be resumed.
 - A Codex session started with `--remote` can't be detected as running.
 - Routing needs a logged-in `claude`, and it is slow (see above).
+- The input box is in English or Chinese; the command-line tool's messages and logs are still in Chinese.
 
 ## Data and privacy
 
