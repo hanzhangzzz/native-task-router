@@ -24,6 +24,28 @@ const CLI = process.env.JEV_ENTRY_CLI || path.join(__dirname, '..', 'src', 'laye
 const WIDTH = 640;
 let win = null;
 let focusedTty = null;
+// 界面语言：JEV_LANG=zh|en 优先，否则跟随 macOS 首选语言（ready 之后才能读）
+let LANG = 'zh';
+const pickLang = () => {
+  const l = (process.env.JEV_LANG || app.getPreferredSystemLanguages()[0] || app.getLocale() || '').toLowerCase();
+  return l.startsWith('zh') ? 'zh' : 'en';
+};
+const T = {
+  zh: {
+    untitled: '(无标题)', noOutput: '无输出', wrote: (p, l) => `已送达 ${p}：${l}`, focused: (l, why) => `只聚焦 ${l}：${why}`,
+    opened: (p, cwd) => `已新开 ${p}：${cwd}`, failed: (why) => `失败：${why}`,
+    trayShow: (k) => `唤起输入框（${k}）`, trayHotkey: '修改快捷键…', trayLogin: '开机自动启动', trayQuit: '退出', hotkeyTitle: '修改快捷键',
+    hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
+  },
+  en: {
+    untitled: '(untitled)', noOutput: 'no output', wrote: (p, l) => `Sent to ${p}: ${l}`,
+    focused: (l) => `Switched to ${l} but didn't type into it (busy, waiting for approval, or has a draft). Your text is on the clipboard.`,
+    opened: (p, cwd) => `Opened ${p} in a new tab: ${cwd}`, failed: (why) => `Failed: ${why}`,
+    trayShow: (k) => `Open input box (${k})`, trayHotkey: 'Change hotkey…', trayLogin: 'Open at login', trayQuit: 'Quit', hotkeyTitle: 'Change hotkey',
+    hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
+  },
+};
+const t = () => T[LANG];
 let hideTimer = null;
 
 // 从 Finder/Dock/登录项启动的 GUI 进程 PATH 很短，找不到 claude/codex：启动时向用户的登录 shell 要一次 PATH
@@ -66,19 +88,20 @@ function runCli(args) {
         const o = JSON.parse(lines[lines.length - 1]);
         resolve({ ...o, line: describe(o) });
       } catch {
-        resolve({ action: 'failed', why: (stderr || String(err || '无输出')).trim(), line: `失败: ${(stderr || String(err || '无输出')).trim().slice(0, 300)}` });
+        const why = (stderr || String(err || t().noOutput)).trim();
+        resolve({ action: 'failed', why, line: t().failed(why.slice(0, 300)) });
       }
     });
   });
 }
 
-const label = (o) => (o.card ? `${o.card.title ?? '(无标题)'} · ${o.card.project}` : o.sessionId);
+const label = (o) => (o.card ? `${o.card.title ?? t().untitled} · ${o.card.project}` : o.sessionId);
 function describe(o) {
   switch (o.action) {
-    case 'wrote': return `已送达 ${o.provider}：${label(o)}`;
-    case 'focused-only': return `只聚焦 ${label(o)}：${o.why}`;
-    case 'opened': return `已新开 ${o.provider}：${o.cwd}`;
-    case 'failed': return `失败：${o.why}`;
+    case 'wrote': return t().wrote(o.provider, label(o));
+    case 'focused-only': return t().focused(label(o), o.why);
+    case 'opened': return t().opened(o.provider, o.cwd);
+    case 'failed': return t().failed(o.why);
     default: return '';
   }
 }
@@ -163,14 +186,15 @@ let hotkeyWin = null;
 function openHotkeyWindow() {
   if (hotkeyWin && !hotkeyWin.isDestroyed()) return hotkeyWin.focus();
   hotkeyWin = new BrowserWindow({
-    width: 420, height: 220, resizable: false, minimizable: false, maximizable: false, title: '修改快捷键',
+    width: 420, height: 220, resizable: false, minimizable: false, maximizable: false, title: t().hotkeyTitle,
     webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
   });
   hotkeyWin.loadFile(path.join(__dirname, 'hotkey.html'));
   if (process.platform === 'darwin') app.show();
   hotkeyWin.on('closed', () => { hotkeyWin = null; });
 }
-ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.JEV_HOTKEY }));
+ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.JEV_HOTKEY, lang: LANG }));
+ipcMain.handle('lang', () => LANG);
 // macOS 系统保留的组合：Electron 注册它们不会报错，而是直接把 Spotlight / 输入法切换等抢走（2026-10-17 实测 ⌘Space）
 const SYSTEM_RESERVED = new Set([
   'Command+Space', 'Control+Space', 'Command+Alt+Space', 'Control+Alt+Command+Space', 'Command+Tab', 'Command+Shift+Tab',
@@ -180,9 +204,9 @@ const SYSTEM_RESERVED = new Set([
 const normKey = (a) => a.split('+').map((p) => ({ Cmd: 'Command', Ctrl: 'Control', Option: 'Alt' }[p] || p)).join('+');
 ipcMain.handle('set-hotkey', (_e, acc) => {
   const a = normKey(String(acc || '').trim());
-  if (!a) return { ok: false, error: '快捷键为空' };
-  if (SYSTEM_RESERVED.has(a)) return { ok: false, error: `${prettyKey(a)} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个` };
-  if (!registerHotkey(a)) return { ok: false, error: `${prettyKey(a)} 注册失败（可能被别的应用占用）` };
+  if (!a) return { ok: false, error: t().hkEmpty };
+  if (SYSTEM_RESERVED.has(a)) return { ok: false, error: t().hkReserved(prettyKey(a)) };
+  if (!registerHotkey(a)) return { ok: false, error: t().hkTaken(prettyKey(a)) };
   saveSettings({ hotkey: a });
   trace({ ev: 'hotkey-set', hotkey: a });
   return { ok: true, hotkey: a, pretty: prettyKey(a) };
@@ -194,12 +218,12 @@ function refreshTray() {
   if (!tray) return;
   const login = app.isPackaged ? app.getLoginItemSettings().openAtLogin : null;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `唤起输入框（${prettyKey(HOTKEY)}）`, click: () => void show() },
-    { label: '修改快捷键…', click: openHotkeyWindow },
-    ...(app.isPackaged ? [{ label: '开机自动启动', type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
+    { label: t().trayShow(prettyKey(HOTKEY)), click: () => void show() },
+    { label: t().trayHotkey, click: openHotkeyWindow },
+    ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
-    { label: '退出', role: 'quit' },
+    { label: t().trayQuit, role: 'quit' },
   ]));
 }
 
@@ -209,6 +233,7 @@ else app.on('second-instance', () => void show());
 
 app.whenReady().then(async () => {
   // 不 app.dock.hide()：accessory 激活策略下 macOS 不让它成为前台，输入框拿不到键盘焦点（2026-10-13 实测）
+  LANG = pickLang();
   loginPath = await resolveLoginPath();
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png')));

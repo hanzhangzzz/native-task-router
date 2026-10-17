@@ -47,7 +47,7 @@
 </style>
 <div id="box">
   <div id="target" hidden></div>
-  <div class="row"><span class="mark">›_</span><textarea id="in" rows="1" placeholder="说一句话，回车发送 · Shift+回车换行 · ← 历史会话" autofocus autocomplete="off" spellcheck="false"></textarea></div>
+  <div class="row"><span class="mark">›_</span><textarea id="in" rows="1" autofocus autocomplete="off" spellcheck="false"></textarea></div>
   <div id="msg"></div>
   <ul id="list"></ul>
   <div id="hint"></div>
@@ -56,6 +56,36 @@
   const $ = (id) => document.getElementById(id);
   const input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box');
   const MAX_INPUT_PX = 220;
+  // 界面文案：语言由主进程决定（JEV_LANG 或 macOS 首选语言）；路由原因按已知文本翻译，未知的不显示原文
+  const I18N = {
+    zh: {
+      placeholder: '说一句话，回车发送 · Shift+回车换行 · ← 历史会话', untitled: '(无标题)',
+      newItem: (p, dir) => `新建 ${p} 会话 · ${dir || '新目录'}`, last: '上次：', recent: '最近：',
+      chooseKeys: [['↑↓', '选择'], ['↵', '确认'], ['1–9', '直选'], ['N', '新建'], ['Esc', '取消']],
+      historyKeys: (hasText) => [['↑↓', '选择'], ['↵', hasText ? '直接发往该会话' : '设为发送目标'], ['→ / Esc', '返回']],
+      to: '→ 发往 ', escCancel: 'Esc 取消', notSent: (r) => `没有自动发送：${r}`, unsure: '拿不准，选一个去处：',
+      routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingHistory: '读取历史会话…', noHistory: '还没有发送过的会话',
+    },
+    en: {
+      placeholder: 'Say one sentence · ↵ send · ⇧↵ newline · ← history', untitled: '(untitled)',
+      newItem: (p, dir) => `New ${p} session · ${dir || 'new folder'}`, last: 'Last: ', recent: 'Recent: ',
+      chooseKeys: [['↑↓', 'select'], ['↵', 'send'], ['1–9', 'pick'], ['N', 'new'], ['Esc', 'cancel']],
+      historyKeys: (hasText) => [['↑↓', 'select'], ['↵', hasText ? 'send to it' : 'set as target'], ['→ / Esc', 'back']],
+      to: '→ to ', escCancel: 'Esc cancel',
+      notSent: (r) => `Not sent automatically: ${{
+        '输入太短或没有具体内容，无法确定去处': 'too short to tell where it goes',
+        '没有可用的模型': 'no router model available',
+        '模型失败、超时或输出无效': 'the router model failed or timed out',
+        '模型首选不一致': 'the router was not consistent',
+        '置信度低于阈值': 'confidence below 0.9',
+      }[r] || 'not sure where it goes'}. Pick one:`,
+      unsure: 'Not sure where this goes. Pick one:',
+      routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingHistory: 'Loading past sessions…', noHistory: 'No past sessions yet',
+    },
+  };
+  let S = I18N.zh;
+  input.placeholder = '';
+  window.jev.lang().then((l) => { S = I18N[l] || I18N.zh; input.placeholder = S.placeholder; render(); });
 
   // mode: input（打字）| busy（等待结果）| choose（Jev 拿不准，选去处）| history（← 历史会话）
   let mode = 'input', items = [], sel = 0, text = '', target = null;
@@ -73,12 +103,12 @@
   };
   const sessionLabel = (it) => {
     const c = it.card;
-    const title = c ? (c.title || c.last || '(无标题)') : it.provider + ':' + it.sessionId;
+    const title = c ? (c.title || c.last || S.untitled) : it.provider + ':' + it.sessionId;
     return `${title} · ${c ? c.project : ''} · ${it.provider}`;
   };
   const itemHtml = (it) => {
-    if (it.kind === 'new') return { main: `新建 ${it.provider} 会话 · ${it.cwd ? it.cwd.split('/').pop() : '新目录'}`, sub: '' };
-    return { main: sessionLabel(it), sub: it.lastInput ? `上次：${it.lastInput}` : (it.card && it.card.last ? `最近：${it.card.last}` : '') };
+    if (it.kind === 'new') return { main: S.newItem(it.provider, it.cwd ? it.cwd.split('/').pop() : ''), sub: '' };
+    return { main: sessionLabel(it), sub: it.lastInput ? S.last + it.lastInput : (it.card && it.card.last ? S.recent + it.card.last : '') };
   };
 
   function render() {
@@ -92,17 +122,15 @@
         if (sub) { const b = document.createElement('div'); b.className = 'sub'; b.textContent = sub; li.appendChild(b); }
         list.appendChild(li);
       });
-      const keys = mode === 'choose'
-        ? [['↑↓', '选择'], ['↵', '确认'], ['1–9', '直选'], ['N', '新建'], ['Esc', '取消']]
-        : [['↑↓', '选择'], ['↵', input.value.trim() ? '直接发往该会话' : '设为发送目标'], ['→ / Esc', '返回']];
+      const keys = mode === 'choose' ? S.chooseKeys : S.historyKeys(!!input.value.trim());
       hint.innerHTML = keys.map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
     } else {
       hint.textContent = '';
     }
     targetEl.hidden = !target;
     if (target) {
-      targetEl.textContent = `→ 发往 ${sessionLabel(target)}`;
-      const h = document.createElement('span'); h.className = 'hint'; h.textContent = 'Esc 取消'; targetEl.appendChild(h);
+      targetEl.textContent = S.to + sessionLabel(target);
+      const h = document.createElement('span'); h.className = 'hint'; h.textContent = S.escCancel; targetEl.appendChild(h);
     }
     reportSize();
   }
@@ -138,7 +166,7 @@
       const fallbackNew = { kind: 'new', provider: (r.suggestNew && r.suggestNew.provider) || 'claude', cwd: r.suggestNew ? r.suggestNew.cwd : null };
       items = r.suggestNew ? [fallbackNew, ...sessions] : [...sessions, fallbackNew];
       sel = 0; mode = 'choose';
-      say(r.reason ? `没有自动发送：${r.reason}` : '拿不准，选一个去处：');
+      say(r.reason ? S.notSent(r.reason) : S.unsure);
       render();
       return;
     }
@@ -149,7 +177,7 @@
   function send() {
     text = input.value.trim();
     if (!text) return;
-    say('处理中…');
+    say(S.routing);
     if (target) run(window.jev.pick({ text, provider: target.provider, sessionId: target.sessionId }));
     else run(window.jev.submit(text));
   }
@@ -157,7 +185,7 @@
   function choose(it) {
     if (!it) return;
     if (mode === 'choose') {
-      say(it.kind === 'new' ? '新建中…' : '送达中…');
+      say(it.kind === 'new' ? S.creating : S.sending);
       run(it.kind === 'new' ? window.jev.pick({ text, new: true, provider: it.provider, cwd: it.cwd }) : window.jev.pick({ text, provider: it.provider, sessionId: it.sessionId }));
       return;
     }
@@ -167,10 +195,10 @@
   }
 
   async function openHistory() {
-    mode = 'history'; items = []; say('读取历史会话…'); render();
+    mode = 'history'; items = []; say(S.loadingHistory); render();
     const h = await window.jev.history();
     if (mode !== 'history') return;
-    if (!h.length) { mode = 'input'; say('还没有发送过的会话'); render(); input.focus(); return; }
+    if (!h.length) { mode = 'input'; say(S.noHistory); render(); input.focus(); return; }
     items = h.map((x) => ({ kind: 'session', ...x })); sel = 0; say(''); render();
   }
   const closeList = () => { mode = 'input'; items = []; say(''); render(); input.focus(); };
