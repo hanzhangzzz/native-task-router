@@ -11,7 +11,7 @@ const RS = String.fromCharCode(30); // 记录分隔
 
 export class ItermNotRunningError extends Error {
   constructor() {
-    super('iTerm 未运行（Surface 不会擅自启动它）');
+    super('iTerm 未运行');
     this.name = 'ItermNotRunningError';
   }
 }
@@ -38,9 +38,34 @@ export async function osa(script: string, args: string[] = []): Promise<string> 
   return stdout.replace(/\n$/, '');
 }
 
-async function assertRunning(): Promise<void> {
+async function isRunning(): Promise<boolean> {
   const out = await osa('tell application "System Events" to return (count of (every application process whose bundle identifier is "com.googlecode.iterm2"))');
-  if (Number(out) < 1) throw new ItermNotRunningError();
+  return Number(out) >= 1;
+}
+
+async function assertRunning(): Promise<void> {
+  if (!(await isRunning())) throw new ItermNotRunningError();
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 冷启动 iTerm 并切到前台；等到窗口数连续约 1 秒不变（启动时自带的窗口已建好）才返回，最多等 15 秒。 */
+async function coldStart(): Promise<void> {
+  await osa('tell application "iTerm" to activate');
+  let last = -1, stable = 0;
+  for (const until = Date.now() + 15_000; Date.now() < until; await sleep(350)) {
+    const n = Number(await osa('tell application "iTerm" to return count of windows').catch(() => '-1'));
+    stable = n >= 0 && n === last ? stable + 1 : 0;
+    last = n;
+    if (stable >= 3) return;
+  }
+}
+
+/** tty 停在 shell 提示符：前台进程组里只有 login/shell（后台辅助进程和已退出的僵尸不算）。iTerm 刚启动时自带的空白会话就是这样。 */
+async function idleShell(tty: string): Promise<boolean> {
+  const { stdout } = await run('ps', ['-t', tty.replace(/^\/dev\//, ''), '-o', 'stat=,comm=']);
+  const fg = stdout.split('\n').map((l) => l.trim().split(/\s+/)).filter(([stat]) => stat && stat.includes('+') && !stat.includes('Z'));
+  return fg.length > 0 && fg.every(([, comm = '']) => ['login', 'zsh', 'bash', 'sh', 'fish'].includes(comm.replace(/^-/, '').split('/').pop()!));
 }
 
 // 公共片段：在全部 window/tab/session 里按 id 找 session，找不到返回 missing value。
@@ -122,10 +147,26 @@ end run`, [viewId]);
     if (r !== 'ok') throw new Error(`iTerm 视图不存在: ${viewId}`);
   },
 
-  /** 默认在当前窗口开 tab，没有可用窗口就新建（iTerm 关闭后会残留不可见的 0 session 窗口对象，所以不能用 count of windows 判断）；opts.windowId 指定窗口（测试和隔离用）。 */
+  /**
+   * 默认在当前窗口开 tab，没有可用窗口就新建（iTerm 关闭后会残留不可见的 0 session 窗口对象，所以不能用 count of windows 判断）；opts.windowId 指定窗口（测试和隔离用）。
+   * iTerm 没在运行时先冷启动它；启动后若只有它自带的一个空白会话，就直接在那个会话里执行，不多留一个空标签页。
+   */
   async openView(cwd, argv, opts) {
-    await assertRunning();
     const command = buildCommand(cwd, argv);
+    if (!(await isRunning())) {
+      await coldStart();
+      const views = await iterm.listViews();
+      if (opts?.windowId === undefined && views.length === 1 && views[0]!.tty && (await idleShell(views[0]!.tty))) {
+        const r = await osa(`${FIND}
+on run argv
+  set s to my findSession(item 1 of argv)
+  if s is missing value then return "missing"
+  tell application "iTerm" to tell s to write text (item 2 of argv)
+  return "ok"
+end run`, [views[0]!.viewId, command]);
+        if (r === 'ok') return views[0]!;
+      }
+    }
     const row = await osa(`${ROW}
 on run argv
   set cmd to item 1 of argv
