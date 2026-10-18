@@ -219,7 +219,8 @@ async function liveSessions(): Promise<LiveSession[]> {
     if (m && tty && tui) tuis.push({ pid: Number(m[1]), tty, resumeId: tui.resumeId });
   }
   if (tuis.length === 0) return [];
-  const lsof = await run('lsof', ['-nP', '-F', 'pn', '-p', tuis.map((t) => t.pid).join(',')]);
+  // -b：不对打开的文件做 stat/readlink。否则会碰到项目目录（常在 ~/Desktop 下），触发 macOS 文件夹授权弹框；路径照样能拿到。
+  const lsof = await run('lsof', ['-b', '-w', '-nP', '-F', 'pn', '-p', tuis.map((t) => t.pid).join(',')]);
   const held = new Map<number, string[]>();
   let cur = 0;
   for (const line of lsof.split('\n')) {

@@ -192,7 +192,8 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('S3 冷 Codex → codex resume', r2.action === 'opened' && JSON.stringify(w2.calls.openView[0].argv) === JSON.stringify(['codex', 'resume', 'C2', TEXT]));
   const w3 = world({ cards: [card('claude', 'S3', path.join(root, 'gone'))] });
   const r3 = await open(TEXT, { ...w3.opts, router: cont('claude', 'S3') });
-  check('会话目录已不存在 → failed + 剪贴板，不开视图', r3.action === 'failed' && w3.calls.openView.length === 0 && w3.calls.clip[0] === TEXT);
+  // 不预先 stat 目录（避免 macOS 文件夹授权）：照常开视图，`cd <目录> && …` 失败时 claude 不启动，正文在命令里
+  check('会话目录不预检 → 照常 openView(原 cwd)，不碰文件系统', r3.action === 'opened' && w3.calls.openView.length === 1 && w3.calls.openView[0].cwd === path.join(root, 'gone'));
   const w4 = world({});
   const r4 = await open(TEXT, { ...w4.opts, router: cont('claude', 'NOPE') });
   check('找不到会话 → failed + 剪贴板', r4.action === 'failed' && w4.calls.openView.length === 0 && w4.calls.clip[0] === TEXT);
