@@ -267,9 +267,9 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
     if (decision.kind === 'new') {
       const provider = byId.get(decision.provider);
       if (!provider) return await failed(`没有 ${decision.provider} 的 Provider`);
-      let cwd = decision.cwd;
-      if (cwd && !fs.existsSync(cwd)) return await failed(`新建目录不存在: ${cwd}`);
-      cwd ??= newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'JevTasks'), text);
+      // 不预先检查目录是否存在：项目常在 ~/Desktop、~/Documents 下，stat 会触发 macOS 文件夹授权弹框，被拒时还会误判为不存在。
+      // 命令是 `cd <目录> && …`，目录不在时 claude 不会启动，iTerm 里能看到报错，正文也在那条命令里。
+      const cwd = decision.cwd ?? newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'JevTasks'), text);
       const view = await opts.surface.openView(cwd, provider.newArgv(text), { windowId: opts.windowId });
       const sessionId = await settle(provider, view, opts.settleMs ?? 2500);
       return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd });
@@ -287,7 +287,6 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
     if (holders.length === 0) {
       const card = cards.find((c) => c.provider === provider.id && c.sessionId === sessionId);
       if (!card) return await failed(`找不到会话 ${provider.id}:${sessionId}`);
-      if (!fs.existsSync(card.cwd)) return await failed(`会话目录已不存在: ${card.cwd}`);
       const view = await opts.surface.openView(card.cwd, provider.resumeArgv(sessionId, text), { windowId: opts.windowId });
       return finish({ action: 'opened', viewId: view.viewId, ...target, cwd: card.cwd });
     }
