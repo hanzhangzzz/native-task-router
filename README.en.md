@@ -96,6 +96,7 @@ sentence ─▶ local session index ─▶ candidates ─▶ model decision ─�
 - **Decision**: each candidate becomes a small card (title, first message, last two messages, a snippet of the last reply, project, last activity). The cards and your previous sentence go to the model, which returns a destination, a confidence, and its top three.
 - **Gate**: it auto-sends only when confidence is ≥ 0.9 and the sentence has real content ("continue" or "ok" doesn't count). Otherwise it lists the top three with the first one preselected, so Enter sends it. Model errors and timeouts never auto-send.
 - **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, that the session is idle, and that the screen shows no approval prompt and no half-typed draft of yours. If any check fails, it only switches to the tab and copies your sentence to the clipboard. It never starts a second process on a session that is already running.
+- **iTerm not running**: it starts iTerm first; if iTerm opens its own blank window on launch, the session goes into that window instead of leaving an empty tab behind.
 
 ## How accurate is it?
 
