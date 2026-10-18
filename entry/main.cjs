@@ -48,20 +48,31 @@ const T = {
 const t = () => T[LANG];
 let hideTimer = null;
 
-// 从 Finder/Dock/登录项启动的 GUI 进程 PATH 很短，找不到 claude/codex：启动时向用户的登录 shell 要一次 PATH
-let loginPath = null;
-function resolveLoginPath() {
+// 从 Finder/Dock/登录项启动的 GUI 进程拿不到用户 shell 里的环境变量：PATH 很短找不到 claude/codex，
+// 用户在 .zshrc 里设的 CLAUDE_CONFIG_DIR / CODEX_HOME（会话数据位置）、openrouter_api_key、JEV_* 也看不到。
+// 启动时向登录 shell 要一次这些变量，只传给本 app 调用的 CLI 子进程；不写日志。
+const LOGIN_ENV_KEY = (k) => k === 'PATH' || k === 'CLAUDE_CONFIG_DIR' || k === 'CODEX_HOME' || k === 'openrouter_api_key' || k.startsWith('JEV_');
+let loginEnv = {};
+function resolveLoginEnv() {
   return new Promise((resolve) => {
-    execFile(process.env.SHELL || '/bin/zsh', ['-ilc', 'printf "__JEVPATH__%s" "$PATH"'], { timeout: 8000 }, (_e, out) => {
-      const m = String(out || '').match(/__JEVPATH__([^\n]*)/);
-      resolve(m ? m[1].trim() : null);
+    execFile(process.env.SHELL || '/bin/zsh', ['-ilc', 'printf "__JEVENV__"; env -0'], { timeout: 8000, maxBuffer: 4 << 20 }, (_e, out) => {
+      const s = String(out || '');
+      const i = s.indexOf('__JEVENV__');
+      const env = {};
+      if (i >= 0) for (const kv of s.slice(i + 10).split('\0')) {
+        const j = kv.indexOf('=');
+        if (j > 0 && LOGIN_ENV_KEY(kv.slice(0, j))) env[kv.slice(0, j)] = kv.slice(j + 1);
+      }
+      resolve(env);
     });
   });
 }
+// 显式传给本进程的环境变量优先（终端里 npm run entry、测试）；登录 shell 的补上缺的
 const childEnv = () => ({
+  ...loginEnv,
   ...process.env,
   ELECTRON_RUN_AS_NODE: '1',
-  PATH: [loginPath, path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.claude/local'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].filter(Boolean).join(':'),
+  PATH: [loginEnv.PATH, path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.claude/local'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].filter(Boolean).join(':'),
 });
 
 // 验收用：JEV_ENTRY_TRACE=<文件> 时追加事件行（只记事件名与动作，不记正文）
@@ -227,6 +238,8 @@ function refreshTray() {
   ]));
 }
 
+// 源码运行（npm run entry、测试）与已安装的 app 同名，会共用用户数据目录和单实例锁：源码版一启动就把唤起转给已安装的 app 后退出。分开目录。
+if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'native-task-router-dev'));
 // 同一时间只允许一个入口（开机自启与手动打开会抢同一个快捷键）
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.on('second-instance', () => void show());
@@ -234,7 +247,7 @@ else app.on('second-instance', () => void show());
 app.whenReady().then(async () => {
   // 不 app.dock.hide()：accessory 激活策略下 macOS 不让它成为前台，输入框拿不到键盘焦点（2026-10-13 实测）
   LANG = pickLang();
-  loginPath = await resolveLoginPath();
+  loginEnv = await resolveLoginEnv();
   createWindow();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png')));
   tray.setToolTip('Native Task Router');
