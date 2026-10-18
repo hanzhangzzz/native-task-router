@@ -11,6 +11,10 @@ import { guarded } from './guard.ts';
 import { entryLogPath, open, readHistory, readPrevious } from './open.ts';
 import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './types.ts';
 
+// 入口借 Electron 的 Node 跑本 CLI，靠 ELECTRON_RUN_AS_NODE=1；它只在进程启动时读一次。立刻删掉，
+// 否则会传给所有子进程：冷启动的 iTerm 及其中每个 shell 都会带上它，在里面启动的 Electron 程序全被当成 Node 运行。
+delete process.env.ELECTRON_RUN_AS_NODE;
+
 // JEV_ONLY_UNDER=<目录>：只路由这个目录下的会话（演示、录屏、教程用，避免真实会话出镜）
 const onlyUnder = process.env.JEV_ONLY_UNDER ? process.env.JEV_ONLY_UNDER.replace(/\/+$/, '') + '/' : null;
 const providers: Provider[] = [claude, codex].map((p) =>
