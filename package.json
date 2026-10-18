@@ -67,6 +67,6 @@
     "dmg": {
       "title": "Native Task Router"
     },
-    "afterPack": "build/adhoc-sign.cjs"
+    "afterPack": "build/sign.cjs"
   }
 }
