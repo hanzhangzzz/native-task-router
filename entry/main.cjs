@@ -238,6 +238,8 @@ function refreshTray() {
   ]));
 }
 
+// 源码运行（npm run entry、测试）与已安装的 app 同名，会共用用户数据目录和单实例锁：源码版一启动就把唤起转给已安装的 app 后退出。分开目录。
+if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'native-task-router-dev'));
 // 同一时间只允许一个入口（开机自启与手动打开会抢同一个快捷键）
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.on('second-instance', () => void show());
