@@ -42,7 +42,7 @@ npm run jev -- route "add a per-user quota to the rate limiter"
 
 1. Download `Native-Task-Router-<version>-arm64.dmg` from [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) and drag the app into Applications. Apple silicon only for now.
 2. **macOS blocks the first launch**: the app is not notarized (the author has no Developer ID). Open System Settings → Privacy & Security and click "Open Anyway" near the bottom, or run `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`.
-3. It then lives in the menu bar (the `›_` icon) and starts at login by default. Press **Control+Option+Space** to open the input box; the menu lets you change the hotkey, turn off start-at-login, or quit.
+3. It then lives in the menu bar (a small speech bubble with an arc to a star) and starts at login by default. Press **Control+Option+Space** to open the input box; the menu lets you change the hotkey, turn off start-at-login, or quit.
 4. On first use, macOS may ask whether it may control iTerm and System Events. Allow it: that's how it finds the tab you're looking at and types into it.
 
 You still need iTerm2 and a logged-in Claude Code (`claude`, used for routing); resuming Codex sessions needs a logged-in `codex`.

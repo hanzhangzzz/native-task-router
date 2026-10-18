@@ -42,7 +42,7 @@ npm run jev -- route "限流那块再加一个按用户维度的配额"
 
 1. 从 [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) 下载 `Native-Task-Router-<版本>-arm64.dmg`，把应用拖进"应用程序"。目前只有 Apple 芯片版本。
 2. **第一次打开会被 macOS 拦下**：应用没有经过苹果公证（作者没有开发者证书）。打开"系统设置 → 隐私与安全性"，在页面下方点"仍要打开"。也可以在终端执行 `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`。
-3. 打开后它常驻在菜单栏（`›_` 图标），默认开机自动启动。按 **Control+Option+Space** 唤起输入框；菜单里可以改快捷键、关掉开机启动、退出。
+3. 打开后它常驻在菜单栏（图标是一个小气泡连到一颗星），默认开机自动启动。按 **Control+Option+Space** 唤起输入框；菜单里可以改快捷键、关掉开机启动、退出。
 4. 第一次使用时，macOS 可能会询问是否允许它控制 iTerm 和"系统事件"，点允许：它要据此找到你正在看的标签页，并把话写进去。
 
 同样需要：iTerm2、已登录的 Claude Code（`claude`，用来判断去处）；续 Codex 会话需要已登录的 `codex`。
