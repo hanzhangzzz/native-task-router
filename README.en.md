@@ -101,17 +101,18 @@ sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a 
 
 ## How accurate is it?
 
-The short version: **it would rather make you press Enter once more than send your message to the wrong place.**
+The short version: **most sentences with real content land in the right project automatically; when unsure it asks you to press Enter once; occasionally it picks the wrong project, and you see that immediately in the tab it opens.**
 
 Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Sending to the wrong project is a hard error; landing in the right project but a different session than the one you had in mind is a soft one (a continuation within the same project, which a human might also pick).
 
-- Project-first routing (current version), 145-sample dev subset: the model picks the right project 71% of the time, and the right project is in its top three 91% of the time. At confidence ≥ 0.85 it auto-sends 37% of messages with 1 wrong project (a message that should have started a new task was filed under another project); at ≥ 0.9 it auto-sends 23% with 0 wrong.
-- Once the project is right, "the project's latest session" is the correct destination 90% of the time (287 continuation samples in the dev set).
-- 31% of these samples are contentless follow-ups like "continue" or "ok". In the product they take the model-free fast path (previous destination / the session you were looking at). The historical data has neither signal, so the fast path's accuracy is not yet measured; only the rules are.
-- The previous session-level router on the held-out set (240 samples, run once): 9% auto-sent, 0 wrong sessions. The new version has not been run on the held-out set yet.
-- Each decision takes 3–7 seconds, mostly `claude -p` startup and Opus inference; the fast path takes tens of milliseconds.
+- Held-out set, 253 samples, run once: 31% are contentless follow-ups like "continue" or "ok"; offline there is no "which session were you looking at" signal, so they all go to confirmation. The other 175 go to the model: **91 auto-sent (52% of sentences with content, 36% of all)**, 4 of them to the wrong project (1.6%), 13 to the right project but a different session (5%).
+- When it asks, the preselected first option is right 70% of the time (continuation samples that went through the model).
+- Raising the threshold from 0.85 to 0.9 drops auto-sends to 21% with 3 wrong projects; 0.95 gives 8% with 0 wrong, about the same as the previous session-level router on its held-out set (9% auto, 0 wrong). `JEV_ROUTER_MIN_CONFIDENCE` lets you choose.
+- Once the project is right, "the project's latest session" is the correct destination 90% of the time (193 continuation samples in the held-out set).
+- The fast path for short follow-ups (previous destination / the session you were looking at) depends on live entry signals that the historical data lacks, so its accuracy is not yet measured; only the rules are.
+- Each decision takes about 4 seconds (p95 7 s), mostly `claude -p` startup and Opus inference; the fast path takes tens of milliseconds.
 
-The sample is small. These numbers show almost no auto-sent mistakes on this data; they don't prove a low error rate.
+The sample is small and reflects one person's habits. These numbers describe this data, not a general error rate.
 
 ## Swappable routing model
 
@@ -121,6 +122,7 @@ Routing only decides where a sentence goes. It is separate from the Claude Code 
 | --- | --- |
 | (default) | Opus via local `claude -p`, using your Claude subscription, with no API key |
 | `JEV_ROUTER_MODEL=sonnet` | Any other model `claude -p` supports |
+| `JEV_ROUTER_MIN_CONFIDENCE=0.95` | Confidence threshold for auto-send (default 0.85); higher means fewer auto-sends and fewer wrong ones |
 | `JEV_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | The same candidates, prompt, and gate via [OpenRouter](https://openrouter.ai); combine with e.g. `JEV_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` to pick any model |
 | `JEV_ROUTER=interim` | Use Jev (`typesafe/jev-1.13`) on OpenRouter Decisions to choose |
 
