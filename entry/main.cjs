@@ -6,28 +6,30 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// 设置（快捷键、开机启动）存在 ~/.jev/settings.json；环境变量 JEV_HOTKEY 优先（开发与测试用）
-const JEV_HOME = process.env.JEV_HOME || path.join(os.homedir(), '.jev');
-const SETTINGS = path.join(JEV_HOME, 'settings.json');
+// 设置（快捷键、开机启动）存在 ~/.ntr/settings.json；环境变量 NTR_HOTKEY 优先（开发与测试用）
+const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
+// 0.2 以前数据目录叫 ~/.jev：第一次启动新版本时整体改名，设置和入口历史原样保留（与 src/layers/open.ts 的 ntrHome 同一规则）
+if (!process.env.NTR_HOME && !fs.existsSync(NTR_HOME) && fs.existsSync(path.join(os.homedir(), '.jev'))) { try { fs.renameSync(path.join(os.homedir(), '.jev'), NTR_HOME); } catch { /* 改名失败就用新目录 */ } }
+const SETTINGS = path.join(NTR_HOME, 'settings.json');
 const DEFAULT_HOTKEY = 'Control+Alt+Space';
 const loadSettings = () => { try { return JSON.parse(fs.readFileSync(SETTINGS, 'utf8')); } catch { return {}; } };
 const saveSettings = (patch) => {
   const next = { ...loadSettings(), ...patch };
-  fs.mkdirSync(JEV_HOME, { recursive: true });
+  fs.mkdirSync(NTR_HOME, { recursive: true });
   fs.writeFileSync(SETTINGS, JSON.stringify(next, null, 2) + '\n');
   return next;
 };
-let HOTKEY = process.env.JEV_HOTKEY || loadSettings().hotkey || DEFAULT_HOTKEY;
+let HOTKEY = process.env.NTR_HOTKEY || loadSettings().hotkey || DEFAULT_HOTKEY;
 const prettyKey = (acc) => acc.replace(/Command\+|Cmd\+/g, '⌘').replace(/Control\+|Ctrl\+/g, '⌃').replace(/Alt\+|Option\+/g, '⌥').replace(/Shift\+/g, '⇧');
-// JEV_ENTRY_CLI 只给界面验收用（换成返回固定结果的桩，不碰真实会话）
-const CLI = process.env.JEV_ENTRY_CLI || path.join(__dirname, '..', 'src', 'layers', 'cli.ts');
+// NTR_ENTRY_CLI 只给界面验收用（换成返回固定结果的桩，不碰真实会话）
+const CLI = process.env.NTR_ENTRY_CLI || path.join(__dirname, '..', 'src', 'layers', 'cli.ts');
 const WIDTH = 640;
 let win = null;
 let focusedTty = null;
-// 界面语言：JEV_LANG=zh|en 优先，否则跟随 macOS 首选语言（ready 之后才能读）
+// 界面语言：NTR_LANG=zh|en 优先，否则跟随 macOS 首选语言（ready 之后才能读）
 let LANG = 'zh';
 const pickLang = () => {
-  const l = (process.env.JEV_LANG || app.getPreferredSystemLanguages()[0] || app.getLocale() || '').toLowerCase();
+  const l = (process.env.NTR_LANG || app.getPreferredSystemLanguages()[0] || app.getLocale() || '').toLowerCase();
   return l.startsWith('zh') ? 'zh' : 'en';
 };
 const T = {
@@ -49,15 +51,15 @@ const t = () => T[LANG];
 let hideTimer = null;
 
 // 从 Finder/Dock/登录项启动的 GUI 进程拿不到用户 shell 里的环境变量：PATH 很短找不到 claude/codex，
-// 用户在 .zshrc 里设的 CLAUDE_CONFIG_DIR / CODEX_HOME（会话数据位置）、openrouter_api_key、JEV_* 也看不到。
+// 用户在 .zshrc 里设的 CLAUDE_CONFIG_DIR / CODEX_HOME（会话数据位置）、openrouter_api_key、NTR_* 也看不到。
 // 启动时向登录 shell 要一次这些变量，只传给本 app 调用的 CLI 子进程；不写日志。
-const LOGIN_ENV_KEY = (k) => k === 'PATH' || k === 'CLAUDE_CONFIG_DIR' || k === 'CODEX_HOME' || k === 'openrouter_api_key' || k.startsWith('JEV_');
+const LOGIN_ENV_KEY = (k) => k === 'PATH' || k === 'CLAUDE_CONFIG_DIR' || k === 'CODEX_HOME' || k === 'openrouter_api_key' || k.startsWith('NTR_');
 let loginEnv = {};
 function resolveLoginEnv() {
   return new Promise((resolve) => {
-    execFile(process.env.SHELL || '/bin/zsh', ['-ilc', 'printf "__JEVENV__"; env -0'], { timeout: 8000, maxBuffer: 4 << 20 }, (_e, out) => {
+    execFile(process.env.SHELL || '/bin/zsh', ['-ilc', 'printf "__NTRENV__"; env -0'], { timeout: 8000, maxBuffer: 4 << 20 }, (_e, out) => {
       const s = String(out || '');
-      const i = s.indexOf('__JEVENV__');
+      const i = s.indexOf('__NTRENV__');
       const env = {};
       if (i >= 0) for (const kv of s.slice(i + 10).split('\0')) {
         const j = kv.indexOf('=');
@@ -75,8 +77,8 @@ const childEnv = () => ({
   PATH: [loginEnv.PATH, path.join(os.homedir(), '.local/bin'), path.join(os.homedir(), '.claude/local'), '/opt/homebrew/bin', '/usr/local/bin', process.env.PATH || '/usr/bin:/bin'].filter(Boolean).join(':'),
 });
 
-// 验收用：JEV_ENTRY_TRACE=<文件> 时追加事件行（只记事件名与动作，不记正文）
-const trace = (ev) => process.env.JEV_ENTRY_TRACE && fs.appendFileSync(process.env.JEV_ENTRY_TRACE, JSON.stringify({ t: Date.now(), ...ev }) + '\n');
+// 验收用：NTR_ENTRY_TRACE=<文件> 时追加事件行（只记事件名与动作，不记正文）
+const trace = (ev) => process.env.NTR_ENTRY_TRACE && fs.appendFileSync(process.env.NTR_ENTRY_TRACE, JSON.stringify({ t: Date.now(), ...ev }) + '\n');
 
 function osa(script) {
   return new Promise((resolve) => {
@@ -162,7 +164,7 @@ ipcMain.handle('submit', async (_e, text) => {
   return finishLater(await runCli([...args, '--', String(text)]));
 });
 ipcMain.handle('pick', async (_e, c) => {
-  const prov = c.provider === 'codex' || (!c.provider && process.env.JEV_DEFAULT_PROVIDER === 'codex') ? 'codex' : 'claude';
+  const prov = c.provider === 'codex' || (!c.provider && process.env.NTR_DEFAULT_PROVIDER === 'codex') ? 'codex' : 'claude';
   const args = ['open', '--json', ...(c.new ? ['--new', prov, ...(c.cwd ? ['--cwd', String(c.cwd)] : [])] : ['--pick', `${c.provider}:${c.sessionId}`])];
   return finishLater(await runCli([...args, '--', String(c.text)]));
 });
@@ -204,7 +206,7 @@ function openHotkeyWindow() {
   if (process.platform === 'darwin') app.show();
   hotkeyWin.on('closed', () => { hotkeyWin = null; });
 }
-ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.JEV_HOTKEY, lang: LANG }));
+ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.NTR_HOTKEY, lang: LANG }));
 ipcMain.handle('lang', () => LANG);
 // macOS 系统保留的组合：Electron 注册它们不会报错，而是直接把 Spotlight / 输入法切换等抢走（2026-10-17 实测 ⌘Space）
 const SYSTEM_RESERVED = new Set([
@@ -264,14 +266,14 @@ app.whenReady().then(async () => {
     return;
   }
   // 测试/排障：不经快捷键直接弹出
-  if (process.env.JEV_ENTRY_SHOW === '1') void show();
+  if (process.env.NTR_ENTRY_SHOW === '1') void show();
   trace({ ev: 'registered', registered: globalShortcut.isRegistered(HOTKEY) });
-  console.log(`jev 入口就绪：${HOTKEY}`);
+  console.log(`ntr 入口就绪：${HOTKEY}`);
   trace({ ev: 'path', hasClaude: (childEnv().PATH || '').split(':').some((d) => fs.existsSync(path.join(d, 'claude'))) });
-  if (process.env.JEV_ENTRY_CONTROL === 'stdin') controlFromStdin();
+  if (process.env.NTR_ENTRY_CONTROL === 'stdin') controlFromStdin();
 });
 /**
- * 验收用控制通道(JEV_ENTRY_CONTROL=stdin)：每行一条 JSON，走与真实按键相同的渲染进程路径，
+ * 验收用控制通道(NTR_ENTRY_CONTROL=stdin)：每行一条 JSON，走与真实按键相同的渲染进程路径，
  * 不需要辅助功能授权，也不会把按键敲进用户的其它 app。
  *   {"cmd":"show"}            等同全局快捷键
  *   {"cmd":"type","text":..}  把文字放进输入框
@@ -291,7 +293,7 @@ function controlFromStdin() {
     else if (m.cmd === 'key') await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(String(m.key))},shiftKey:${!!m.shift}}))`);
     else if (m.cmd === 'caret') await js(`(()=>{const i=document.getElementById('in');i.setSelectionRange(${Number(m.at) || 0},${Number(m.at) || 0});})()`);
     else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code)) });
-    else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__jevProbe()')), window: win.getContentSize() });
+    else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await win.webContents.capturePage()).toPNG());
   });
 }

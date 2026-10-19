@@ -210,11 +210,11 @@ export function fastPath(text: string, ctx: RouteContext, policy: Pick<RouterV3P
 export function createRouterV3(opts: RouterV3Options = {}): Router {
   const policy: RouterV3Policy = { ...DEFAULT_POLICY_V3, ...opts.policy };
   const env = opts.env ?? process.env;
-  if (env.JEV_ROUTER_MODEL) policy.model = env.JEV_ROUTER_MODEL;
+  if (env.NTR_ROUTER_MODEL) policy.model = env.NTR_ROUTER_MODEL;
   // 自动闸门阈值可调：留出集上 0.85 → 自动 36%、送错项目 1.6%；0.9 → 21%、1.2%；0.95 → 8%、0%
-  const t = Number(env.JEV_ROUTER_MIN_CONFIDENCE);
-  if (env.JEV_ROUTER_MIN_CONFIDENCE && t >= 0 && t <= 1) policy.minConfidence = t;
-  const viaOpenRouter = !opts.complete && env.JEV_ROUTER_BACKEND === 'openrouter';
+  const t = Number(env.NTR_ROUTER_MIN_CONFIDENCE);
+  if (env.NTR_ROUTER_MIN_CONFIDENCE && t >= 0 && t <= 1) policy.minConfidence = t;
+  const viaOpenRouter = !opts.complete && env.NTR_ROUTER_BACKEND === 'openrouter';
   const complete = opts.complete ?? (viaOpenRouter ? openRouterComplete(env) : claudeCliComplete());
   if (viaOpenRouter && !policy.model.includes('/')) policy.model = `anthropic/claude-${policy.model}-5.5`;
   const now = opts.now ?? Date.now;

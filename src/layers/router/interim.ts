@@ -81,7 +81,7 @@ export const interimRouter: Router = {
       costUsd: null,
       model: null,
     });
-    if (!(process.env.JEV_ROUTER_API_KEY ?? process.env.openrouter_api_key)) return fallback(NO_KEY);
+    if (!(process.env.NTR_ROUTER_API_KEY ?? process.env.openrouter_api_key)) return fallback(NO_KEY);
 
     const candidates = recall(text, ctx).map(toCandidate);
     const prev = ctx.previous;
@@ -107,5 +107,5 @@ export const interimRouter: Router = {
 };
 
 function defaultProvider(): ProviderId {
-  return process.env.JEV_DEFAULT_PROVIDER === 'codex' ? 'codex' : 'claude';
+  return process.env.NTR_DEFAULT_PROVIDER === 'codex' ? 'codex' : 'claude';
 }

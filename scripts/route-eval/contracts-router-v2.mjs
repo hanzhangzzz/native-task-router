@@ -91,7 +91,7 @@ const QN = '帮我调研一下家里 NAS 的备份方案和价格对比';
   check('选了不存在的 id → 不自动', r3.kind === 'clarify' && !r3.auto);
   const r4 = await router(async () => ({ text: '乱码', costUsd: 0.01 })).route(Q, ctx());
   check('输出无法解析 → 不自动', r4.kind === 'clarify' && !r4.auto);
-  const r5 = await createRouterV2({ env: { JEV_ROUTER_BACKEND: 'openrouter' }, now: () => T0 }).route(Q, ctx());
+  const r5 = await createRouterV2({ env: { NTR_ROUTER_BACKEND: 'openrouter' }, now: () => T0 }).route(Q, ctx());
   check('OpenRouter 后端缺 key → 不自动（不联网）', r5.kind === 'clarify' && !r5.auto);
   const r6 = await router(pick('sid-2', 0.97), {}).route(Q, ctx({ cards: [] }));
   check('没有任何会话 → 不崩溃、不自动续接', r6.kind !== 'continue');
@@ -153,12 +153,12 @@ const QN = '帮我调研一下家里 NAS 的备份方案和价格对比';
   check('cleanReply 空值安全', cleanReply(null) === '');
 }
 
-// ---- 路由模型可替换（JEV_ROUTER_MODEL） ----
+// ---- 路由模型可替换（NTR_ROUTER_MODEL） ----
 {
   const seen = [];
   const rec = async (req) => { seen.push(req.model); return { text: '', costUsd: null, error: 'x' }; };
-  await createRouterV2({ complete: rec, env: { JEV_ROUTER_MODEL: 'sonnet' }, now: () => T0 }).route('把任务3里那个导出报表的接口改成分页返回', ctx());
-  check('JEV_ROUTER_MODEL 覆盖 claude -p 的模型别名', seen[0] === 'sonnet');
+  await createRouterV2({ complete: rec, env: { NTR_ROUTER_MODEL: 'sonnet' }, now: () => T0 }).route('把任务3里那个导出报表的接口改成分页返回', ctx());
+  check('NTR_ROUTER_MODEL 覆盖 claude -p 的模型别名', seen[0] === 'sonnet');
   await createRouterV2({ complete: rec, env: {}, now: () => T0 }).route('把任务3里那个导出报表的接口改成分页返回', ctx());
   check('不设时默认 opus', seen[1] === 'opus');
 }

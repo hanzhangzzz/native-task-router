@@ -4,11 +4,11 @@
 # 只影响当前用户；uninstall 会删除这个 plist 并停止入口。
 set -euo pipefail
 
-LABEL="dev.jev.entry"
+LABEL="dev.nativetaskrouter.entry"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 ELECTRON="${ROOT}/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"
-LOG_DIR="${JEV_HOME:-${HOME}/.jev}"
+LOG_DIR="${NTR_HOME:-${HOME}/.ntr}"
 DOMAIN="gui/$(id -u)"
 
 xml_escape() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }

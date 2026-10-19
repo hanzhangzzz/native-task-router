@@ -1,5 +1,5 @@
 // iTerm Surface 真实运行验收（TE-2 ①–⑤）。只操作本脚本新建的专用测试窗口；日志落 .runtime/te2/。
-// 用法: JEV_LIVE_ITERM=1 node scripts/layers-iterm.live.mjs [--focus]（不设则不运行：会在你正在用的 iTerm 里建测试窗口）   （--focus 会在最后把 iTerm 带到前台测一次 focus）
+// 用法: NTR_LIVE_ITERM=1 node scripts/layers-iterm.live.mjs [--focus]（不设则不运行：会在你正在用的 iTerm 里建测试窗口）   （--focus 会在最后把 iTerm 带到前台测一次 focus）
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

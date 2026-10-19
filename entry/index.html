@@ -56,7 +56,7 @@
   const $ = (id) => document.getElementById(id);
   const input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box');
   const MAX_INPUT_PX = 220;
-  // 界面文案：语言由主进程决定（JEV_LANG 或 macOS 首选语言）；路由原因按已知文本翻译，未知的不显示原文
+  // 界面文案：语言由主进程决定（NTR_LANG 或 macOS 首选语言）；路由原因按已知文本翻译，未知的不显示原文
   const I18N = {
     zh: {
       placeholder: '说一句话，回车发送 · Shift+回车换行 · ← 历史会话', untitled: '(无标题)',
@@ -85,15 +85,15 @@
   };
   let S = I18N.zh;
   input.placeholder = '';
-  window.jev.lang().then((l) => { S = I18N[l] || I18N.zh; input.placeholder = S.placeholder; render(); });
+  window.ntr.lang().then((l) => { S = I18N[l] || I18N.zh; input.placeholder = S.placeholder; render(); });
 
-  // mode: input（打字）| busy（等待结果）| choose（Jev 拿不准，选去处）| history（← 历史会话）
+  // mode: input（打字）| busy（等待结果）| choose（拿不准，选去处）| history（← 历史会话）
   let mode = 'input', items = [], sel = 0, text = '', target = null;
   // inflight：请求已交给 CLI、结果未回；lastAction：上一次结果（决定再次唤起时是否恢复正文）
   let inflight = false, lastAction = null;
 
   const say = (s, err) => { msg.textContent = s || ''; msg.className = err ? 'err' : ''; };
-  const reportSize = () => requestAnimationFrame(() => window.jev.resize(Math.ceil(box.getBoundingClientRect().height)));
+  const reportSize = () => requestAnimationFrame(() => window.ntr.resize(Math.ceil(box.getBoundingClientRect().height)));
   const grow = () => {
     input.style.height = 'auto';
     const h = input.scrollHeight;
@@ -154,7 +154,7 @@
     if (mode === 'choose' || lastAction === 'failed') return backToInput(text);
     reset();
   }
-  window.jev.onShow(onShow);
+  window.ntr.onShow(onShow);
 
   async function run(p) {
     mode = 'busy'; input.disabled = true; items = []; render();
@@ -178,15 +178,15 @@
     text = input.value.trim();
     if (!text) return;
     say(S.routing);
-    if (target) run(window.jev.pick({ text, provider: target.provider, sessionId: target.sessionId }));
-    else run(window.jev.submit(text));
+    if (target) run(window.ntr.pick({ text, provider: target.provider, sessionId: target.sessionId }));
+    else run(window.ntr.submit(text));
   }
 
   function choose(it) {
     if (!it) return;
     if (mode === 'choose') {
       say(it.kind === 'new' ? S.creating : S.sending);
-      run(it.kind === 'new' ? window.jev.pick({ text, new: true, provider: it.provider, cwd: it.cwd }) : window.jev.pick({ text, provider: it.provider, sessionId: it.sessionId }));
+      run(it.kind === 'new' ? window.ntr.pick({ text, new: true, provider: it.provider, cwd: it.cwd }) : window.ntr.pick({ text, provider: it.provider, sessionId: it.sessionId }));
       return;
     }
     // history：已有正文就直接发过去；否则设为发送目标，回到输入
@@ -196,7 +196,7 @@
 
   async function openHistory() {
     mode = 'history'; items = []; say(S.loadingHistory); render();
-    const h = await window.jev.history();
+    const h = await window.ntr.history();
     if (mode !== 'history') return;
     if (!h.length) { mode = 'input'; say(S.noHistory); render(); input.focus(); return; }
     items = h.map((x) => ({ kind: 'session', ...x })); sel = 0; say(''); render();
@@ -212,7 +212,7 @@
       e.preventDefault();
       if (mode === 'history') return closeList();
       if (mode === 'input' && target) { target = null; return render(); }
-      return window.jev.cancel();
+      return window.ntr.cancel();
     }
     if (mode === 'choose' || mode === 'history') {
       if (k === 'ArrowDown' || k === 'ArrowUp') {
@@ -238,7 +238,7 @@
   }, true);
 
   // 验收探针（入口 stdin 控制通道读取界面状态用；只读）
-  window.__jevProbe = () => ({
+  window.__ntrProbe = () => ({
     mode, inflight, lastAction, sel, items: items.map((it) => (it.kind === 'new' ? 'NEW' : `${it.provider}:${it.sessionId}`)),
     target: target ? `${target.provider}:${target.sessionId}` : null,
     value: input.value, inputHeight: input.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(input).lineHeight),

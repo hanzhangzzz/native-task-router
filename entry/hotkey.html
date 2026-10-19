@@ -25,11 +25,11 @@
   let pending = null;
   const I18N = {
     zh: { title: '修改快捷键', h: '按下新的快捷键组合', close: '关闭', save: '保存',
-      fromEnv: '当前由环境变量 JEV_HOTKEY 指定，这里保存的设置要在去掉它后才生效', start: '点上面的框，然后按下想用的组合键',
+      fromEnv: '当前由环境变量 NTR_HOTKEY 指定，这里保存的设置要在去掉它后才生效', start: '点上面的框，然后按下想用的组合键',
       needKey: '按住修饰键（⌘ ⌃ ⌥ ⇧），再按一个字母、数字、空格或 F 键', needMod: '至少要带一个修饰键（⌘ ⌃ ⌥ ⇧），免得和平时打字冲突',
       pressSave: '按"保存"生效', saved: (k) => `已改为 ${k}` },
     en: { title: 'Change hotkey', h: 'Press a new key combination', close: 'Close', save: 'Save',
-      fromEnv: 'JEV_HOTKEY is set in the environment; what you save here applies once it is removed', start: 'Click the box above, then press the keys you want',
+      fromEnv: 'NTR_HOTKEY is set in the environment; what you save here applies once it is removed', start: 'Click the box above, then press the keys you want',
       needKey: 'Hold a modifier (⌘ ⌃ ⌥ ⇧) and press a letter, digit, Space or F-key', needMod: 'Use at least one modifier (⌘ ⌃ ⌥ ⇧) so it never fires while you type',
       pressSave: 'Press Save to apply', saved: (k) => `Changed to ${k}` },
   };
@@ -45,7 +45,7 @@
       Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/', ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right' };
     return map[code] || null;
   };
-  window.jev.getHotkey().then((h) => {
+  window.ntr.getHotkey().then((h) => {
     S = I18N[h.lang] || I18N.zh;
     document.title = S.title; document.getElementById('h').textContent = S.h;
     document.getElementById('cancel').textContent = S.close; save.textContent = S.save;
@@ -66,7 +66,7 @@
   });
   save.addEventListener('click', async () => {
     if (!pending) return;
-    const r = await window.jev.setHotkey(pending);
+    const r = await window.ntr.setHotkey(pending);
     if (r.ok) { say(S.saved(r.pretty), 'ok'); save.disabled = true; setTimeout(() => window.close(), 900); }
     else say(r.error, 'err');
   });

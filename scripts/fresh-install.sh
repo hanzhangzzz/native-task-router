@@ -5,8 +5,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/jev-fresh-XXXXXX")"
-CLONE="${TMP}/jev-task-router"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/ntr-fresh-XXXXXX")"
+CLONE="${TMP}/native-task-router"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); echo "PASS $1"; }
 bad() { FAIL=$((FAIL+1)); echo "FAIL $1"; }
@@ -36,14 +36,14 @@ if npm test >"${TMP}/test.log" 2>&1; then ok "npm test（类型检查 + 全部�
 
 # 5. 能读到本机原生会话
 N="$(node src/layers/cli.ts sessions --limit 1 2>&1 >/dev/null | grep -oE '[0-9]+' | head -1)"
-[ -n "${N}" ] && [ "${N}" -gt 0 ] && ok "jev sessions 读到 ${N} 个交互会话" || bad "jev sessions 没有读到会话"
+[ -n "${N}" ] && [ "${N}" -gt 0 ] && ok "ntr sessions 读到 ${N} 个交互会话" || bad "ntr sessions 没有读到会话"
 
 # 6. 一次真实路由判断（只判断不送达）
 OUT="$(node src/layers/cli.ts route --json "帮我写一个统计 nginx 日志里每小时 5xx 数量的小脚本" 2>"${TMP}/route.err")"
 KIND="$(printf '%s' "${OUT}" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).kind)}catch{console.log("")}})')"
 case "${KIND}" in
-  continue|new|clarify) ok "jev route 给出决策：${KIND}（$(tail -1 "${TMP}/route.err")）" ;;
-  *) bad "jev route 没有给出决策：$(head -c 300 "${TMP}/route.err")" ;;
+  continue|new|clarify) ok "ntr route 给出决策：${KIND}（$(tail -1 "${TMP}/route.err")）" ;;
+  *) bad "ntr route 没有给出决策：$(head -c 300 "${TMP}/route.err")" ;;
 esac
 
 echo

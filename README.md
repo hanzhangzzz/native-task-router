@@ -24,7 +24,7 @@ Native Task Router 替你记。它在你本机所有 Claude Code / Codex 会话�
 先零风险试一下，它只告诉你会发去哪，不碰任何会话：
 
 ```bash
-npm run jev -- route "限流那块再加一个按用户维度的配额"
+npm run ntr -- route "限流那块再加一个按用户维度的配额"
 ```
 
 ## 为什么不直接用 resume
@@ -51,14 +51,14 @@ npm run jev -- route "限流那块再加一个按用户维度的配额"
 
 **前置条件**：macOS、[iTerm2](https://iterm2.com)、Node.js ≥ 24（已在 25.5 上测试）、已登录的 [Claude Code](https://docs.claude.com/en/docs/claude-code)（`claude` 在 PATH 里）。要续 Codex 会话，还需要已登录的 `codex`。
 
-> 默认用你本机的 `claude -p --model opus` 判断去处，走你自己的 Claude 订阅，不需要额外的 API key。每次判断会把候选会话的摘要片段发给 Anthropic，详见[数据与隐私](#数据与隐私)。命令和配置沿用内部代号 jev：`npm run jev`、`JEV_*` 环境变量、`~/.jev/` 数据目录。
+> 默认用你本机的 `claude -p --model opus` 判断去处，走你自己的 Claude 订阅，不需要额外的 API key。每次判断会把候选会话的摘要片段发给 Anthropic，详见[数据与隐私](#数据与隐私)。
 
 ```bash
 git clone https://github.com/hanzhangzzz/native-task-router.git && cd native-task-router
 npm ci                                   # 会顺带下载 Electron
 
-npm run jev -- sessions                  # 它认识你的哪些会话（最近的在前）
-npm run jev -- route "帮我写一个统计 nginx 日志里每小时 5xx 数量的小脚本"
+npm run ntr -- sessions                  # 它认识你的哪些会话（最近的在前）
+npm run ntr -- route "帮我写一个统计 nginx 日志里每小时 5xx 数量的小脚本"
 ```
 
 ```
@@ -69,7 +69,7 @@ npm run jev -- route "帮我写一个统计 nginx 日志里每小时 5xx 数量�
 觉得判断靠谱，就把入口常驻起来，按 **Control+Option+Space** 说话：
 
 ```bash
-npm run entry                            # 常驻入口（JEV_HOTKEY 可改快捷键）
+npm run entry                            # 常驻入口（NTR_HOTKEY 可改快捷键）
 scripts/login-item.sh install            # 可选：登录后自动启动；uninstall 撤销
 ```
 
@@ -84,13 +84,13 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 | ←（光标在开头） | 展开你发过的会话；选中后这句话**确定地**发过去，不经过判断 |
 | Esc | 关掉；没发出去的话，下次打开还在 |
 
-输入框的界面语言跟随 macOS（中文或英文）；`JEV_LANG=zh` 或 `en` 可以指定。
+输入框的界面语言跟随 macOS（中文或英文）；`NTR_LANG=zh` 或 `en` 可以指定。
 
 ![← 展开历史会话](docs/images/entry-history.png)
 
-命令行也能做同样的事：`npm run jev -- open "<一句话>"` 真实送达，`--pick claude:<会话id>` 指定目标，`--new claude|codex` 直接新建。
+命令行也能做同样的事：`npm run ntr -- open "<一句话>"` 真实送达，`--pick claude:<会话id>` 指定目标，`--new claude|codex` 直接新建。
 
-新建的会话放在 `~/JevTasks/<这句话的简称>-<编号>` 里；设置 `JEV_TASKS_DIR` 可以换一个目录。
+新建的会话放在 `~/ntr-tasks/<这句话的简称>-<编号>` 里；设置 `NTR_TASKS_DIR` 可以换一个目录。
 
 ## 它怎么工作
 
@@ -116,7 +116,7 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 - 留出集 253 条，只跑一次：31% 是"继续""好的"这类没内容的短句，离线没有"正看着哪个会话"的信号，一律转确认；其余 175 条进模型，**自动送达 91 条（占有内容句子的 52%，占全部 36%）**，其中送错项目 4 次（1.6%），项目对、会话不同 13 次（5%）。
 - 需要确认时，预选的第一个 70% 是对的（进模型的续接样本）。
-- 把阈值从 0.85 提到 0.9，自动降到 21%、送错项目 3 次；提到 0.95，自动 8%、送错 0 次——和上一版按会话路由的留出集结果（自动 9%、0 送错）相当。`JEV_ROUTER_MIN_CONFIDENCE` 可以自己选。
+- 把阈值从 0.85 提到 0.9，自动降到 21%、送错项目 3 次；提到 0.95，自动 8%、送错 0 次——和上一版按会话路由的留出集结果（自动 9%、0 送错）相当。`NTR_ROUTER_MIN_CONFIDENCE` 可以自己选。
 - 项目选对之后，"项目内最近的会话"就是正确去处的比例是 90%（留出集 193 条续接样本）。
 - 短句快路径（上一句去处 / 正看着的会话）依赖入口的实时信号，历史数据里没有，准确率还没评测，只有规则本身。
 - 每次判断约 4 秒（p95 7 秒），主要花在 `claude -p` 启动和 Opus 推理上；短句快路径几十毫秒。
@@ -130,12 +130,12 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 | 设置 | 效果 |
 | --- | --- |
 | （默认） | Opus，经本机 `claude -p`，用你的 Claude 订阅，不需要 API key |
-| `JEV_ROUTER_MODEL=sonnet` | 换成 `claude -p` 支持的其他模型 |
-| `JEV_ROUTER_MIN_CONFIDENCE=0.95` | 自动送达的置信度阈值（默认 0.85）；越高越少自动、越少送错 |
-| `JEV_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | 同一套候选、提示词和闸门，经 [OpenRouter](https://openrouter.ai) 调用；再用 `JEV_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` 之类指定任意模型 |
-| `JEV_ROUTER=interim` | 改用 OpenRouter Decisions 上的 Jev（`typesafe/jev-1.13`）来选 |
+| `NTR_ROUTER_MODEL=sonnet` | 换成 `claude -p` 支持的其他模型 |
+| `NTR_ROUTER_MIN_CONFIDENCE=0.95` | 自动送达的置信度阈值（默认 0.85）；越高越少自动、越少送错 |
+| `NTR_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | 同一套候选、提示词和闸门，经 [OpenRouter](https://openrouter.ai) 调用；再用 `NTR_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` 之类指定任意模型 |
+| `NTR_ROUTER=interim` | 改用 OpenRouter Decisions 上的 Jev（`typesafe/jev-1.13`）来选 |
 
-也可以自己实现 [`Router`](src/layers/types.ts) 接口，接入别的路由。提醒一句：上面的准确率是用默认 Opus 测的；同一套评测里，DeepSeek V4.1 Flash、GPT-5.6 Luna、Qwen3.8 Flash、Haiku 5.5 的首选正确率只有 54–66%（Opus 约 73%）。换模型之前，先用 `npm run jev -- route` 在自己的会话上试试。
+也可以自己实现 [`Router`](src/layers/types.ts) 接口，接入别的路由。提醒一句：上面的准确率是用默认 Opus 测的；同一套评测里，DeepSeek V4.1 Flash、GPT-5.6 Luna、Qwen3.8 Flash、Haiku 5.5 的首选正确率只有 54–66%（Opus 约 73%）。换模型之前，先用 `npm run ntr -- route` 在自己的会话上试试。
 
 ## 已知限制
 
@@ -146,7 +146,7 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 ## 数据与隐私
 
-- **留在本机**：会话索引缓存和入口记录都在 `~/.jev/`（`cache/` 随时可删；`entry-log.jsonl` 是 ← 历史会话的来源）。不修改任何原生历史。
+- **留在本机**：会话索引缓存和入口记录都在 `~/.ntr/`（`cache/` 随时可删；`entry-log.jsonl` 是 ← 历史会话的来源；0.3 以前叫 `~/.jev/`，第一次启动新版本时会原样改名）。不修改任何原生历史。
 - **发出去的**：每次判断，把候选会话的有界片段（每张卡片的标题、首句、最近两句各约 120–160 字，加上回复片段）和你这句话，经你本机的 `claude -p` 发给 Anthropic；换成 OpenRouter 后端时，发给 OpenRouter 及它路由到的模型供应商（请求要求不留存、不训练）。发送前会遮掉形如 `sk-…`、`ghp_…`、`AKIA…`、`token=…` 的凭证。不会发送完整对话。
 - 送达之后，内容由原生 Claude Code / Codex 按它们自己的方式处理。
 
@@ -156,7 +156,7 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 npm test                                 # 类型检查 + 全部离线契约（不碰 iTerm、不调模型）
 scripts/fresh-install.sh                 # 从零安装自检：干净克隆 → npm ci → npm test → 读会话 → 一次真实判断
 npm run entry:ux                         # 入口界面验收（真实窗口 + 桩 CLI，不发真实消息）
-JEV_LIVE_ITERM=1 npm run open:live       # 真实 iTerm 端到端：会在你的 iTerm 里建测试窗口、跑真实 claude/codex，默认不运行
+NTR_LIVE_ITERM=1 npm run open:live       # 真实 iTerm 端到端：会在你的 iTerm 里建测试窗口、跑真实 claude/codex，默认不运行
 ```
 
 分层代码在 [`src/layers/`](src/layers)：`providers/`（谁持有会话：claude、codex）、`surfaces/`（在哪展示：iterm）、`router/`（判断去处）、`open.ts`（编排）；入口在 [`entry/`](entry)。各层之间的合同见 [`src/layers/types.ts`](src/layers/types.ts)。

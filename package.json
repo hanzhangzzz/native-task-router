@@ -1,6 +1,6 @@
 {
   "name": "native-task-router",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm 里续上",
@@ -11,7 +11,7 @@
     "postinstall": "install-electron",
     "check": "tsc --noEmit && bash scripts/shell-multibyte.guard.sh",
     "test": "npm run -s check && npm run -s providers:contracts && npm run -s iterm:contracts && npm run -s open:contracts && npm run -s router:contracts && npm run -s route-eval:contracts",
-    "jev": "node src/layers/cli.ts",
+    "ntr": "node src/layers/cli.ts",
     "entry": "electron entry/main.cjs",
     "providers:contracts": "node scripts/layers-providers.contracts.mjs",
     "iterm:contracts": "node scripts/layers-iterm.contracts.mjs",

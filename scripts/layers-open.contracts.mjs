@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-open-'));
-process.env.JEV_HOME = path.join(root, 'jev');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
+process.env.NTR_HOME = path.join(root, 'ntr');
 const { open, approvalPrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
 
@@ -113,7 +113,7 @@ function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails 
     providers: [mkProvider('claude'), mkProvider('codex')],
     surface,
     logPath: path.join(root, `log-${Math.random().toString(36).slice(2)}.jsonl`),
-    tasksRoot: path.join(root, 'JevTasks'),
+    tasksRoot: path.join(root, 'ntr-tasks'),
     settleMs: 0,
     clipboard: async (t) => {
       if (clipFails) throw new Error('nopbcopy');
@@ -203,7 +203,7 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
 {
   const w = world({});
   const r = await open('帮我整理发票', { ...w.opts, router: route({ kind: 'new', provider: 'claude', cwd: null, confidence: null, reason: 'x' }) });
-  check('S5 new 无 cwd → 建 JevTasks/<短名>-<4位>', r.action === 'opened' && new RegExp(`^${path.join(root, 'JevTasks').replaceAll('/', '\\/')}\\/帮我整理发票-\\d{4}$`).test(r.cwd) && fs.statSync(r.cwd).isDirectory(), JSON.stringify(r));
+  check('S5 new 无 cwd → 建 ntr-tasks/<短名>-<4位>', r.action === 'opened' && new RegExp(`^${path.join(root, 'ntr-tasks').replaceAll('/', '\\/')}\\/帮我整理发票-\\d{4}$`).test(r.cwd) && fs.statSync(r.cwd).isDirectory(), JSON.stringify(r));
   check('S5 argv=newArgv(正文)', JSON.stringify(w.calls.openView[0].argv) === JSON.stringify(['claude', '帮我整理发票']));
   const proj = fs.mkdtempSync(path.join(root, 'proj-'));
   const w2 = world({});
@@ -211,7 +211,7 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('S4 new 给定 cwd → 原样使用', r2.action === 'opened' && r2.cwd === proj && w2.calls.openView[0].cwd === proj && w2.calls.openView[0].argv[0] === 'codex');
   const w3 = world({});
   const r3 = await open('x', { ...w3.opts, router: { route: async () => { throw new Error('不应路由'); } }, forceNew: { provider: 'codex' } });
-  check('forceNew 跳过路由', r3.action === 'opened' && r3.cwd.startsWith(path.join(root, 'JevTasks')));
+  check('forceNew 跳过路由', r3.action === 'opened' && r3.cwd.startsWith(path.join(root, 'ntr-tasks')));
 }
 
 // ---- 入口历史（← 展开） ----
@@ -302,7 +302,7 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   const realFetch = globalThis.fetch;
   let fetched = 0;
   delete process.env.openrouter_api_key;
-  delete process.env.JEV_ROUTER_API_KEY;
+  delete process.env.NTR_ROUTER_API_KEY;
   globalThis.fetch = async () => { fetched += 1; throw new Error('不应发请求'); };
   const ctx = { cards, live: [], previous: null };
   const noKey = await interimRouter.route('税率发票', ctx);

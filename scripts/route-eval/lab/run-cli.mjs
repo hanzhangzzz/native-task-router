@@ -8,7 +8,7 @@ import * as V2 from '../../../src/layers/router/v2.ts';
 import { claudeCli } from './claude-cli.mjs';
 const args = process.argv.slice(2); const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const name = arg('--name'), model = arg('--model', 'sonnet'), order = arg('--order', 'recent-first'), SET = arg('--set', 'dev'), cand = arg('--cand', 'u20');
-if (SET === 'heldout' && !process.env.JEV_HELDOUT_OK) { console.error('实验脚本不得读取留出集'); process.exit(1); }
+if (SET === 'heldout' && !process.env.NTR_HELDOUT_OK) { console.error('实验脚本不得读取留出集'); process.exit(1); }
 let samples = loadSamples(SET); const sub = arg('--subset'); if (sub?.startsWith('stride:')) { const k = +sub.slice(7); samples = samples.filter((_, i) => i % k === 0); }
 const rows = await cpool(samples, Number(arg('--conc', 4)), async (s) => {
   const cards = await poolFor(s); const c = cand === 'all' ? cards : V2.selectCandidates(s.text, { cards, live: [], previous: s.prev ?? null }, V2.DEFAULT_POLICY.recallRecent, V2.DEFAULT_POLICY.recallLexical);

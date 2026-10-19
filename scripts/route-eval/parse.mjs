@@ -71,7 +71,8 @@ export function isRuntimeFixtureCwd(cwd) {
   return !!cwd && cwd.includes('/.runtime/');
 }
 export function isJevScratchCwd(cwd) {
-  return !!cwd && cwd.startsWith(`${os.homedir()}/JevTasks/`);
+  // 路由器新建会话的暂存目录：现在是 ~/ntr-tasks，旧版本是 ~/JevTasks（历史里仍有）
+  return !!cwd && (cwd.startsWith(`${os.homedir()}/ntr-tasks/`) || cwd.startsWith(`${os.homedir()}/JevTasks/`));
 }
 
 const hashKey = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 16);

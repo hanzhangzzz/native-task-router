@@ -184,9 +184,9 @@ export async function askJev(opts: {
   timeoutMs?: number;
 }): Promise<JevDecision> {
   const started = Date.now();
-  const key = process.env.JEV_ROUTER_API_KEY ?? process.env.openrouter_api_key;
-  const url = process.env.JEV_ROUTER_ENDPOINT ?? process.env.openrouter_jev_base_url ?? 'https://openrouter.ai/api/alpha/decisions';
-  const model = process.env.JEV_ROUTER_MODEL ?? process.env.openrouter_jev_model ?? DEFAULT_MODEL;
+  const key = process.env.NTR_ROUTER_API_KEY ?? process.env.openrouter_api_key;
+  const url = process.env.NTR_ROUTER_ENDPOINT ?? process.env.openrouter_jev_base_url ?? 'https://openrouter.ai/api/alpha/decisions';
+  const model = process.env.NTR_ROUTER_MODEL ?? process.env.openrouter_jev_model ?? DEFAULT_MODEL;
   const redact = (value:string) => key?value.split(key).join('[redacted]'):value;
   const fail = (error: string): JevDecision => ({
     kind: 'clarify',
@@ -199,7 +199,7 @@ export async function askJev(opts: {
     error: redact(error),
     options: clarifyOptions(opts.candidates, null),
   });
-  if (!key) return fail('未配置路由 API Key：请设置环境变量 openrouter_api_key（或 JEV_ROUTER_API_KEY）。');
+  if (!key) return fail('未配置路由 API Key：请设置环境变量 openrouter_api_key（或 NTR_ROUTER_API_KEY）。');
   if (opts.candidates.length === 0) {
     return {
       kind: 'new',

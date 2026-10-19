@@ -4,7 +4,7 @@
 // AppleScript 照样返回成功、窗口不关；旧测试因此改成往会话里输入 `exit`，又留下关不掉的
 // "0 个会话的窗口对象"。两者叠加让用户的 iTerm 卡死、无法正常退出。
 // 正确做法：逐个 close 测试窗口里的会话（单个会话关闭不弹确认），最后一个关掉后窗口随之消失。
-//   - 必须显式 JEV_LIVE_ITERM=1 才运行（默认不碰用户的 iTerm）；
+//   - 必须显式 NTR_LIVE_ITERM=1 才运行（默认不碰用户的 iTerm）；
 //   - 只建一个测试窗口，收尾逐个关闭其中的会话（绝不对整个窗口 close），并核对 iTerm 的窗口对象回到测试前；
 //   - Ctrl-C / 被终止 / 未捕获异常时同样关闭测试窗口。
 import { execFile } from 'node:child_process';
@@ -15,10 +15,10 @@ const osa = async (script) => (await run('osascript', ['-e', script], { timeout:
 const windowIds = async () => (await osa('tell application "iTerm" to get id of every window')).split(',').map((s) => s.trim()).filter(Boolean);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** 没有 JEV_LIVE_ITERM=1 就退出（退出码 2，不算通过）。 */
+/** 没有 NTR_LIVE_ITERM=1 就退出（退出码 2，不算通过）。 */
 export function requireLiveOptIn(name) {
-  if (process.env.JEV_LIVE_ITERM === '1') return;
-  console.error(`NOT_RUN ${name}: 会在你正在用的 iTerm 里建测试窗口并运行真实 Claude/Codex。确认要跑时设置 JEV_LIVE_ITERM=1。`);
+  if (process.env.NTR_LIVE_ITERM === '1') return;
+  console.error(`NOT_RUN ${name}: 会在你正在用的 iTerm 里建测试窗口并运行真实 Claude/Codex。确认要跑时设置 NTR_LIVE_ITERM=1。`);
   process.exit(2);
 }
 
