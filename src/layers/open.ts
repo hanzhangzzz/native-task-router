@@ -252,7 +252,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       const focusedSessionId = opts.focusedTty ? (live.find((l) => l.tty === opts.focusedTty)?.sessionId ?? null) : null;
       const r = await opts.router.route(text, { cards, live, previous: readPrevious(logPath, now()), focusedSessionId });
       decision = r;
-      decisionLog = { source: 'router', kind: r.kind, model: r.model, latencyMs: r.latencyMs, costUsd: r.costUsd, reason: r.reason };
+      const x = r as RouteDecision & { via?: string; project?: string | null; ranked?: unknown[] };
+      decisionLog = { source: 'router', kind: r.kind, model: r.model, latencyMs: r.latencyMs, costUsd: r.costUsd, reason: r.reason, via: x.via ?? null, project: x.project ?? null };
       if (r.kind !== 'clarify') Object.assign(decisionLog, { provider: r.provider, sessionId: r.kind === 'continue' ? r.sessionId : null });
     }
 

@@ -7,6 +7,7 @@ import { codexQueue } from './providers/codex-queue.ts';
 import { iterm } from './surfaces/iterm.ts';
 import { interimRouter } from './router/interim.ts';
 import { createRouterV2 } from './router/v2.ts';
+import { createRouterV3 } from './router/v3.ts';
 import { guarded } from './guard.ts';
 import { entryLogPath, open, readHistory, readPrevious } from './open.ts';
 import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './types.ts';
@@ -21,9 +22,10 @@ const providers: Provider[] = [claude, codex].map((p) =>
   onlyUnder ? { ...p, listSessions: async () => (await p.listSessions()).filter((c) => (c.cwd + '/').startsWith(onlyUnder)) } : p,
 );
 
-/** 默认 Router v2（TE-4b 冻结策略，经本机 `claude -p`）；JEV_ROUTER=interim 退回过渡路由（需要 OpenRouter key）。 */
+/** 默认 Router v3（项目优先，经本机 `claude -p`）；JEV_ROUTER=v2 退回会话级路由，=interim 退回过渡路由（需要 OpenRouter key）。 */
 async function pickRouter(): Promise<Router> {
-  return process.env.JEV_ROUTER === 'interim' ? interimRouter : createRouterV2();
+  const r = process.env.JEV_ROUTER;
+  return r === 'interim' ? interimRouter : r === 'v2' ? createRouterV2() : createRouterV3();
 }
 const isProvider = (s: string): s is ProviderId => s === 'claude' || s === 'codex';
 

@@ -1,6 +1,6 @@
 {
   "name": "native-task-router",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm 里续上",
@@ -16,7 +16,7 @@
     "providers:contracts": "node scripts/layers-providers.contracts.mjs",
     "iterm:contracts": "node scripts/layers-iterm.contracts.mjs",
     "open:contracts": "node scripts/layers-open.contracts.mjs",
-    "router:contracts": "node scripts/route-eval/contracts-router-v2.mjs",
+    "router:contracts": "node scripts/route-eval/contracts-router-v2.mjs && node scripts/route-eval/contracts-router-v3.mjs",
     "entry:ux": "node scripts/entry-ux.live.mjs",
     "iterm:live": "node scripts/layers-iterm.live.mjs",
     "open:live": "node scripts/layers-open.live.mjs",

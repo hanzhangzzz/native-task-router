@@ -47,7 +47,7 @@ export async function evaluate({ router, samples, sessions, buildCard = defaultB
       if (spent >= maxCostUsd) { budgetStopped = true; return; }
       const s = samples[i];
       const cards = await poolCardsAt(sessions, s.t, buildCard);
-      const ctx = { cards, live: [], previous: s.prev ?? null, focusedSessionId: null };
+      const ctx = { cards, live: [], previous: s.prev ?? null, focusedSessionId: null, nowMs: Date.parse(s.t) };
       let decision;
       const started = Date.now();
       for (let attempt = 0; ; attempt++) {
