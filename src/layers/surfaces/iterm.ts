@@ -38,13 +38,13 @@ export async function osa(script: string, args: string[] = []): Promise<string> 
   return stdout.replace(/\n$/, '');
 }
 
-async function isRunning(): Promise<boolean> {
+export async function itermRunning(): Promise<boolean> {
   const out = await osa('tell application "System Events" to return (count of (every application process whose bundle identifier is "com.googlecode.iterm2"))');
   return Number(out) >= 1;
 }
 
 async function assertRunning(): Promise<void> {
-  if (!(await isRunning())) throw new ItermNotRunningError();
+  if (!(await itermRunning())) throw new ItermNotRunningError();
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -153,7 +153,7 @@ end run`, [viewId]);
    */
   async openView(cwd, argv, opts) {
     const command = buildCommand(cwd, argv);
-    if (!(await isRunning())) {
+    if (!(await itermRunning())) {
       await coldStart();
       const views = await iterm.listViews();
       if (opts?.windowId === undefined && views.length === 1 && views[0]!.tty && (await idleShell(views[0]!.tty))) {

@@ -1,10 +1,13 @@
 // ntr CLI：`node src/layers/cli.ts open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex] [--focused-tty /dev/ttysN]`
 // 另有 `sessions`（卡片摘要）、`live`（存活映射）。入口窗口（entry/main.cjs）以子进程调用 `open --json`。
+// 终端：iTerm 与 Terminal 都支持；新开会话去哪个见 surfaces/multi.ts 的 pickTarget（NTR_TERMINAL=iterm|terminal 可指定）。
 // 测试隔离：--window-id N（或 NTR_WINDOW_ID）把新 tab 开进指定 iTerm 窗口。
 import { claude } from './providers/claude.ts';
 import { codex } from './providers/codex.ts';
 import { codexQueue } from './providers/codex-queue.ts';
-import { iterm } from './surfaces/iterm.ts';
+import { iterm, itermRunning } from './surfaces/iterm.ts';
+import { terminal, terminalRunning } from './surfaces/terminal.ts';
+import { createMulti, itermInstalled } from './surfaces/multi.ts';
 import { interimRouter } from './router/interim.ts';
 import { createRouterV2 } from './router/v2.ts';
 import { createRouterV3 } from './router/v3.ts';
@@ -28,6 +31,15 @@ async function pickRouter(): Promise<Router> {
   return r === 'interim' ? interimRouter : r === 'v2' ? createRouterV2() : createRouterV3();
 }
 const isProvider = (s: string): s is ProviderId => s === 'claude' || s === 'codex';
+
+const terminals = (focusedTty: string | null = null) =>
+  createMulti({
+    surfaces: { iterm, terminal },
+    running: (s) => (s === 'iterm' ? itermRunning() : terminalRunning()),
+    itermInstalled,
+    focusedTty,
+    env: process.env.NTR_TERMINAL,
+  });
 
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -84,7 +96,7 @@ async function main(): Promise<number> {
   }
   if (cmd === 'live') {
     const live = (await Promise.all(providers.map((p) => p.liveSessions()))).flat();
-    const views = await iterm.listViews();
+    const views = await terminals().listViews();
     for (const l of live) console.log(JSON.stringify({ ...l, viewId: views.find((v) => v.tty && v.tty === l.tty)?.viewId ?? null }));
     return 0;
   }
@@ -119,7 +131,7 @@ async function main(): Promise<number> {
     return 2;
   }
 
-  const g = guarded(iterm, codexQueue);
+  const g = guarded(terminals(focusedTty), codexQueue);
   const outcome = await open(text, {
     router: await pickRouter(),
     providers,

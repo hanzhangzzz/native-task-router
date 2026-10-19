@@ -54,9 +54,9 @@ export interface Provider {
   newArgv(prompt: string): string[];
 }
 
-export type SurfaceId = 'iterm';
+export type SurfaceId = 'iterm' | 'terminal';
 
-/** Surface 上的一个可见视图（iTerm 的一个 session/标签页）。 */
+/** Surface 上的一个可见视图（iTerm 的一个 session，或 Terminal 的一个 tab）。 */
 export interface SurfaceView {
   surface: SurfaceId;
   viewId: string;

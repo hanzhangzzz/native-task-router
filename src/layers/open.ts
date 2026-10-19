@@ -23,7 +23,7 @@ import type {
   SurfaceView,
 } from './types.ts';
 
-export type OpenSurface = Omit<Surface, 'openView'> & {
+export type OpenSurface = Omit<Surface, 'openView' | 'id'> & {
   openView(cwd: string, argv: string[], opts?: { windowId?: number }): Promise<SurfaceView>;
 };
 
@@ -35,9 +35,9 @@ export interface OpenOptions {
   pick?: { provider: ProviderId; sessionId: string };
   /** 人明确要新建 */
   forceNew?: { provider: ProviderId; cwd?: string };
-  /** 新 tab 开进指定 iTerm 窗口（测试隔离） */
+  /** 新 tab 开进指定 iTerm 窗口（测试隔离；给了就固定用 iTerm） */
   windowId?: number;
-  /** 唤起入口前前台 iTerm 会话的 tty */
+  /** 唤起入口前前台终端（iTerm 或 Terminal）会话的 tty */
   focusedTty?: string | null;
   /** 原生"给已有会话排队消息"通道（仅对空闲的存活会话使用，不经按键） */
   queue?: Partial<Record<ProviderId, (sessionId: string, text: string) => Promise<void>>>;
@@ -309,8 +309,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       const why = !holder.tty
         ? '会话存活但没有终端（后台进程）'
         : views.length > 1
-          ? `终端 ${holder.tty} 对应多个 iTerm 视图，无法确定写哪个`
-          : `会话存活在 iTerm 之外（${holder.tty}，pid ${holder.pid}），不能写入也不能再开第二个进程`;
+          ? `终端 ${holder.tty} 对应多个终端视图，无法确定写哪个`
+          : `会话存活在 iTerm / Terminal 之外（${holder.tty}，pid ${holder.pid}），不能写入也不能再开第二个进程`;
       return await failed(why);
     }
 
