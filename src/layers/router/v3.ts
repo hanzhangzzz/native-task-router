@@ -215,7 +215,7 @@ export function createRouterV3(opts: RouterV3Options = {}): Router {
   const complete = opts.complete ?? (viaOpenRouter ? openRouterComplete(env) : claudeCliComplete());
   if (viaOpenRouter && !policy.model.includes('/')) policy.model = `anthropic/claude-${policy.model}-5.5`;
   const now = opts.now ?? Date.now;
-  return { route: (text, ctx) => routeV3(text, ctx, policy, complete, now()) };
+  return { route: (text, ctx) => routeV3(text, ctx, policy, complete, ctx.nowMs ?? now()) };
 }
 
 export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3Policy, complete: Complete, nowMs: number): Promise<RouterV3Result> {

@@ -85,6 +85,8 @@ export interface RouteContext {
   previous?: { utterance: string; provider: ProviderId; sessionId: string; minutesAgo: number } | null;
   /** 唤起入口前位于前台的会话（若可知） */
   focusedSessionId?: string | null;
+  /** "现在"的时刻（毫秒）。生产不传（取 Date.now）；离线评测传样本时刻，使"多久前活跃"和时间规则按当时计算 */
+  nowMs?: number;
 }
 
 export interface RouteOption {

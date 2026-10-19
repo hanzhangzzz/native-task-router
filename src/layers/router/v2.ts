@@ -354,7 +354,7 @@ export function createRouterV2(opts: RouterV2Options = {}): Router {
   const now = opts.now ?? Date.now;
   return {
     async route(text, ctx) {
-      return routeV2(text, ctx, policy, complete, now());
+      return routeV2(text, ctx, policy, complete, ctx.nowMs ?? now());
     },
   };
 }

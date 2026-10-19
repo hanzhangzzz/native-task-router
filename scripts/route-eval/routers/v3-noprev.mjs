@@ -5,7 +5,7 @@
 // 短句一律 clarify，有内容的句子由模型选项目。
 import { createRouterV3, ROUTER_V3_VERSION, DEFAULT_POLICY_V3 } from '../../../src/layers/router/v3.ts';
 
-export const version = `${ROUTER_V3_VERSION}/noprev`;
+export const version = `${ROUTER_V3_VERSION}/noprev-r3`; // r1 因 --max-cost 0 在 0 条样本处停止；r2 评测器未传样本时刻（nowMs），24h 规则按今天算，结果作废
 export const model = DEFAULT_POLICY_V3.model;
 export const notes = 'production createRouterV3 with ctx.previous=null (historical prev is not the entry previous); live=[] as in all offline evals';
 export async function create() {
