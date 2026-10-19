@@ -17,7 +17,7 @@ const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split
 const calls = () => lines(STUB_LOG).filter((a) => a[0] === 'open');
 
 const el = spawn(path.join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(ROOT, 'entry/main.cjs')], {
-  env: { ...process.env, JEV_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), JEV_STUB_LOG: STUB_LOG, JEV_ENTRY_TRACE: TRACE, JEV_ENTRY_CONTROL: 'stdin', JEV_HOTKEY: 'Control+Alt+Shift+F12' },
+  env: { ...process.env, NTR_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), NTR_STUB_LOG: STUB_LOG, NTR_ENTRY_TRACE: TRACE, NTR_ENTRY_CONTROL: 'stdin', NTR_HOTKEY: 'Control+Alt+Shift+F12' },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 let out = '';
@@ -36,8 +36,8 @@ const waitCalls = async (n) => { for (let i = 0; i < 50; i++) { if (calls().leng
 const show = async () => { send({ cmd: 'show' }); await sleep(700); };
 
 try {
-  for (let i = 0; i < 100 && !out.includes('jev 入口就绪'); i++) await sleep(100);
-  check('入口启动', out.includes('jev 入口就绪'), out);
+  for (let i = 0; i < 100 && !out.includes('ntr 入口就绪'); i++) await sleep(100);
+  check('入口启动', out.includes('ntr 入口就绪'), out);
 
   // ---- 1. 多行：自动换行、输入框与窗口一起长高 ----
   await show();
@@ -124,7 +124,7 @@ try {
   send({ cmd: 'type', text: '普通一句' });
   send({ cmd: 'enter' });
   const c4 = await waitCalls(5);
-  check('取消目标后回车走 Jev 路由（无 --pick）', JSON.stringify(c4[4]) === JSON.stringify(['open', '--json', '--', '普通一句']), JSON.stringify(c4[4]));
+  check('取消目标后回车走路由（无 --pick）', JSON.stringify(c4[4]) === JSON.stringify(['open', '--json', '--', '普通一句']), JSON.stringify(c4[4]));
 
   // ---- 6. 关闭再打开：没送出去的话保留 ----
   const hideShow = async () => { send({ cmd: 'hide' }); await sleep(300); await show(); return probe(); };

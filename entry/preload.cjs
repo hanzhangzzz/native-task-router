@@ -1,5 +1,5 @@
 const { contextBridge, ipcRenderer } = require('electron');
-contextBridge.exposeInMainWorld('jev', {
+contextBridge.exposeInMainWorld('ntr', {
   submit: (text) => ipcRenderer.invoke('submit', text),
   pick: (choice) => ipcRenderer.invoke('pick', choice),
   cancel: () => ipcRenderer.send('cancel'),

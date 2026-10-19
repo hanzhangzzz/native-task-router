@@ -1,7 +1,7 @@
-// 入口界面验收用的桩 CLI（JEV_ENTRY_CLI）：不碰真实会话，按输入返回固定结果，并把收到的参数追加到 JEV_STUB_LOG。
+// 入口界面验收用的桩 CLI（NTR_ENTRY_CLI）：不碰真实会话，按输入返回固定结果，并把收到的参数追加到 NTR_STUB_LOG。
 import fs from 'node:fs';
 const args = process.argv.slice(2);
-fs.appendFileSync(process.env.JEV_STUB_LOG, JSON.stringify(args) + '\n');
+fs.appendFileSync(process.env.NTR_STUB_LOG, JSON.stringify(args) + '\n');
 const card = (title, project, last) => ({ title, project, cwd: `/tmp/${project}`, last });
 if (args[0] === 'history') {
   console.log(JSON.stringify([

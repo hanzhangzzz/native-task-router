@@ -24,7 +24,7 @@ Now      ⌃⌥Space → "add a per-user quota to the rate limiter" → Enter
 Try it with zero risk first. This only tells you where the sentence would go and touches no session:
 
 ```bash
-npm run jev -- route "add a per-user quota to the rate limiter"
+npm run ntr -- route "add a per-user quota to the rate limiter"
 ```
 
 ## Why not just use resume?
@@ -51,20 +51,20 @@ You still need iTerm2 and a logged-in Claude Code (`claude`, used for routing); 
 
 **Requirements**: macOS, [iTerm2](https://iterm2.com), Node.js ≥ 24 (tested on 25.5), and a logged-in [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on PATH). Resuming Codex sessions also needs a logged-in `codex`.
 
-> By default, routing runs `claude -p --model opus` on your machine, using your own Claude subscription; no extra API key is needed. Each decision sends short snippets of candidate sessions to Anthropic; see [Data and privacy](#data-and-privacy). Commands and settings keep the internal codename jev: `npm run jev`, `JEV_*` environment variables, and the `~/.jev/` data directory.
+> By default, routing runs `claude -p --model opus` on your machine, using your own Claude subscription; no extra API key is needed. Each decision sends short snippets of candidate sessions to Anthropic; see [Data and privacy](#data-and-privacy).
 
 ```bash
 git clone https://github.com/hanzhangzzz/native-task-router.git && cd native-task-router
 npm ci                                   # also downloads Electron
 
-npm run jev -- sessions                  # sessions it can route to (most recent first)
-npm run jev -- route "write a script that counts nginx 5xx errors per hour"
+npm run ntr -- sessions                  # sessions it can route to (most recent first)
+npm run ntr -- route "write a script that counts nginx 5xx errors per hour"
 ```
 
 If the routing looks right, keep the entry running and press **Control+Option+Space**:
 
 ```bash
-npm run entry                            # resident input box (change the hotkey with JEV_HOTKEY)
+npm run entry                            # resident input box (change the hotkey with NTR_HOTKEY)
 scripts/login-item.sh install            # optional: start at login; `uninstall` reverts it
 ```
 
@@ -77,11 +77,11 @@ scripts/login-item.sh install            # optional: start at login; `uninstall`
 | ← (caret at start) | List sessions you've sent to before; picking one sends there **deterministically**, skipping the routing step |
 | Esc | Close; anything you haven't sent is still there next time |
 
-The input box follows your macOS language (English or Chinese); set `JEV_LANG=en` or `zh` to force one.
+The input box follows your macOS language (English or Chinese); set `NTR_LANG=en` or `zh` to force one.
 
-The CLI can do the same: `npm run jev -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, and `--new claude|codex` starts a new session.
+The CLI can do the same: `npm run ntr -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, and `--new claude|codex` starts a new session.
 
-New sessions go to `~/JevTasks/<short name>-<number>`; set `JEV_TASKS_DIR` to use another folder.
+New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to use another folder.
 
 ## How it works
 
@@ -107,7 +107,7 @@ Evaluated on about a month of the author's real local history ([method and data]
 
 - Held-out set, 253 samples, run once: 31% are contentless follow-ups like "continue" or "ok"; offline there is no "which session were you looking at" signal, so they all go to confirmation. The other 175 go to the model: **91 auto-sent (52% of sentences with content, 36% of all)**, 4 of them to the wrong project (1.6%), 13 to the right project but a different session (5%).
 - When it asks, the preselected first option is right 70% of the time (continuation samples that went through the model).
-- Raising the threshold from 0.85 to 0.9 drops auto-sends to 21% with 3 wrong projects; 0.95 gives 8% with 0 wrong, about the same as the previous session-level router on its held-out set (9% auto, 0 wrong). `JEV_ROUTER_MIN_CONFIDENCE` lets you choose.
+- Raising the threshold from 0.85 to 0.9 drops auto-sends to 21% with 3 wrong projects; 0.95 gives 8% with 0 wrong, about the same as the previous session-level router on its held-out set (9% auto, 0 wrong). `NTR_ROUTER_MIN_CONFIDENCE` lets you choose.
 - Once the project is right, "the project's latest session" is the correct destination 90% of the time (193 continuation samples in the held-out set).
 - The fast path for short follow-ups (previous destination / the session you were looking at) depends on live entry signals that the historical data lacks, so its accuracy is not yet measured; only the rules are.
 - Each decision takes about 4 seconds (p95 7 s), mostly `claude -p` startup and Opus inference; the fast path takes tens of milliseconds.
@@ -121,12 +121,12 @@ Routing only decides where a sentence goes. It is separate from the Claude Code 
 | Setting | Effect |
 | --- | --- |
 | (default) | Opus via local `claude -p`, using your Claude subscription, with no API key |
-| `JEV_ROUTER_MODEL=sonnet` | Any other model `claude -p` supports |
-| `JEV_ROUTER_MIN_CONFIDENCE=0.95` | Confidence threshold for auto-send (default 0.85); higher means fewer auto-sends and fewer wrong ones |
-| `JEV_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | The same candidates, prompt, and gate via [OpenRouter](https://openrouter.ai); combine with e.g. `JEV_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` to pick any model |
-| `JEV_ROUTER=interim` | Use Jev (`typesafe/jev-1.13`) on OpenRouter Decisions to choose |
+| `NTR_ROUTER_MODEL=sonnet` | Any other model `claude -p` supports |
+| `NTR_ROUTER_MIN_CONFIDENCE=0.95` | Confidence threshold for auto-send (default 0.85); higher means fewer auto-sends and fewer wrong ones |
+| `NTR_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | The same candidates, prompt, and gate via [OpenRouter](https://openrouter.ai); combine with e.g. `NTR_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` to pick any model |
+| `NTR_ROUTER=interim` | Use Jev (`typesafe/jev-1.13`) on OpenRouter Decisions to choose |
 
-You can also implement the [`Router`](src/layers/types.ts) interface yourself. One caveat: the accuracy above was measured with the default Opus. In the same eval, DeepSeek V4.1 Flash, GPT-5.6 Luna, Qwen3.8 Flash, and Haiku 5.5 picked the right first choice only 54–66% of the time, versus about 73% for Opus. Try `npm run jev -- route` on your own sessions before switching.
+You can also implement the [`Router`](src/layers/types.ts) interface yourself. One caveat: the accuracy above was measured with the default Opus. In the same eval, DeepSeek V4.1 Flash, GPT-5.6 Luna, Qwen3.8 Flash, and Haiku 5.5 picked the right first choice only 54–66% of the time, versus about 73% for Opus. Try `npm run ntr -- route` on your own sessions before switching.
 
 ## Known limitations
 
@@ -138,7 +138,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 
 ## Data and privacy
 
-- **Stays on your Mac**: the session index cache and the entry log live in `~/.jev/` (`cache/` is safe to delete; `entry-log.jsonl` feeds the ← history list). Native history is never modified.
+- **Stays on your Mac**: the session index cache and the entry log live in `~/.ntr/` (`cache/` is safe to delete; `entry-log.jsonl` feeds the ← history list; before 0.3 the directory was `~/.jev/` and is renamed as-is on first launch). Native history is never modified.
 - **Leaves your Mac**: for each decision, bounded snippets of candidate sessions (per card, the title, first message, and last two messages at about 120–160 characters each, plus a reply snippet) and your sentence go to Anthropic through your local `claude -p`. With the OpenRouter backend, they go to OpenRouter and the provider it routes to, with no data retention or training requested. Credentials shaped like `sk-…`, `ghp_…`, `AKIA…`, or `token=…` are masked first. Full conversations are never sent.
 - Once delivered, your message is handled by native Claude Code / Codex as usual.
 
@@ -148,7 +148,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 npm test                                 # type check + all offline contracts (no iTerm, no model calls)
 scripts/fresh-install.sh                 # clean clone → npm ci → npm test → read sessions → one real routing decision
 npm run entry:ux                         # entry UI acceptance (real window + stub CLI, sends nothing real)
-JEV_LIVE_ITERM=1 npm run open:live       # real iTerm end-to-end: opens a test window in your iTerm and runs real claude/codex; off by default
+NTR_LIVE_ITERM=1 npm run open:live       # real iTerm end-to-end: opens a test window in your iTerm and runs real claude/codex; off by default
 ```
 
 The layered code is in [`src/layers/`](src/layers): `providers/` (who owns a session: claude, codex), `surfaces/` (where it is shown: iterm), `router/` (deciding the destination), and `open.ts` (orchestration). The entry is in [`entry/`](entry). The contract between layers is [`src/layers/types.ts`](src/layers/types.ts).

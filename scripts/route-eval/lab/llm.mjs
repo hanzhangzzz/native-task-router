@@ -59,7 +59,7 @@ export async function chat({ model, messages, tag = 'untagged', maxTokens = 300,
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}`, 'x-title': 'jev-route-lab' },
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}`, 'x-title': 'ntr-route-lab' },
         body: JSON.stringify(body),
         redirect: 'error',
         signal: AbortSignal.timeout(timeoutMs),

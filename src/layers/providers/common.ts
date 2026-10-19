@@ -249,8 +249,17 @@ function currentCacheVersion(): string {
   return cacheVersion;
 }
 
+/** 数据目录：$NTR_HOME 或 ~/.ntr。0.2 以前叫 ~/.jev：第一次用新版本时整体改名（入口历史、设置、缓存原样保留）。 */
+export function ntrHome(): string {
+  if (process.env.NTR_HOME) return process.env.NTR_HOME;
+  const home = path.join(os.homedir(), '.ntr');
+  const legacy = path.join(os.homedir(), '.jev');
+  if (!fs.existsSync(home) && fs.existsSync(legacy)) { try { fs.renameSync(legacy, home); } catch { /* 改名失败就用新目录，不动旧目录 */ } }
+  return home;
+}
+
 export function cacheDir(): string {
-  return path.join(process.env.JEV_HOME || path.join(os.homedir(), '.jev'), 'cache');
+  return path.join(ntrHome(), 'cache');
 }
 
 export function loadCache(name: string): Map<string, CacheEntry> {

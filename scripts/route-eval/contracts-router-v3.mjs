@@ -92,9 +92,9 @@ const Q = '把导出报表的接口改成分页返回';
   let called = false;
   const r5 = await router(async () => { called = true; return pick(B, 0.95)(); }).route('继续', ctx({ focusedSessionId: 'b1', live: [{ provider: 'claude', sessionId: 'b1', pid: 1, tty: '/dev/ttys001', state: 'idle' }] }));
   check('短句走快路径，不调模型', r5.via === 'fast' && r5.kind === 'continue' && r5.sessionId === 'b1' && !called);
-  const r7 = await createRouterV3({ complete: pick(B, 0.9), env: { JEV_ROUTER_MIN_CONFIDENCE: '0.95' }, now: () => T0 }).route(Q, ctx());
-  check('JEV_ROUTER_MIN_CONFIDENCE 提高阈值后 0.9 不再自动', r7.kind === 'clarify' && !r7.auto);
-  const r6 = await createRouterV3({ env: { JEV_ROUTER_BACKEND: 'openrouter' }, now: () => T0 }).route(Q, ctx());
+  const r7 = await createRouterV3({ complete: pick(B, 0.9), env: { NTR_ROUTER_MIN_CONFIDENCE: '0.95' }, now: () => T0 }).route(Q, ctx());
+  check('NTR_ROUTER_MIN_CONFIDENCE 提高阈值后 0.9 不再自动', r7.kind === 'clarify' && !r7.auto);
+  const r6 = await createRouterV3({ env: { NTR_ROUTER_BACKEND: 'openrouter' }, now: () => T0 }).route(Q, ctx());
   check('OpenRouter 后端缺 key → 不自动（不联网）', r6.kind === 'clarify' && !r6.auto);
 }
 

@@ -1,8 +1,8 @@
 // open() 真实 iTerm 验收（TE-5，场景 S1–S8 + 真实 interim 路由冒烟 + 入口窗口端到端）。
 // 隔离：只在本脚本新建的 iTerm 专用窗口里开 tab；会话 cwd 都在 .runtime/te5/work/ 下；
-// 所有写入/聚焦/排队/resume 都过 JEV_GUARD_FILE 名单闸门（只允许本脚本创建的视图与会话）。
+// 所有写入/聚焦/排队/resume 都过 NTR_GUARD_FILE 名单闸门（只允许本脚本创建的视图与会话）。
 // 结束时关窗口、杀本脚本启动的进程、删本脚本创建的会话，并核对用户原有视图前后一致。
-// 用法: JEV_LIVE_ITERM=1 node scripts/layers-open.live.mjs [--no-entry]（不设则不运行：会在你正在用的 iTerm 里建测试窗口）    日志: .runtime/te5/live.log
+// 用法: NTR_LIVE_ITERM=1 node scripts/layers-open.live.mjs [--no-entry]（不设则不运行：会在你正在用的 iTerm 里建测试窗口）    日志: .runtime/te5/live.log
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -17,10 +17,10 @@ const D = path.join(ROOT, '.runtime/te5');
 const WORK = path.join(D, 'work');
 fs.rmSync(WORK, { recursive: true, force: true });
 fs.mkdirSync(WORK, { recursive: true });
-process.env.JEV_HOME = path.join(D, 'jev-home');
-fs.rmSync(path.join(process.env.JEV_HOME, 'entry-log.jsonl'), { force: true });
+process.env.NTR_HOME = path.join(D, 'ntr-home');
+fs.rmSync(path.join(process.env.NTR_HOME, 'entry-log.jsonl'), { force: true });
 const GUARD = path.join(D, 'guard.json');
-process.env.JEV_GUARD_FILE = GUARD;
+process.env.NTR_GUARD_FILE = GUARD;
 const LOG = path.join(D, 'live.log');
 fs.writeFileSync(LOG, '');
 
@@ -58,7 +58,7 @@ saveGuard();
 const ownView = (id) => { if (!own.views.includes(id)) throw new Error(`非本测试视图 ${id}`); return id; };
 const G = guarded(iterm, codexQueue, GUARD);
 const clip = [];
-const baseOpts = (extra = {}) => ({ providers, surface: G.surface, queue: { codex: G.queue }, windowId: wid, clipboard: async (t) => void clip.push(t), settleMs: 8000, tasksRoot: path.join(D, 'JevTasks'), ...extra });
+const baseOpts = (extra = {}) => ({ providers, surface: G.surface, queue: { codex: G.queue }, windowId: wid, clipboard: async (t) => void clip.push(t), settleMs: 8000, tasksRoot: path.join(D, 'ntr-tasks'), ...extra });
 const noRoute = { route: async () => { throw new Error('不应路由'); } };
 
 async function openTest(cwd, argv) {
@@ -231,7 +231,7 @@ try {
   if (c4) { own.sessions.push(c4.sessionId); saveGuard(); }
   const t5 = 'S5 全新项目 请只回复 OK-S5';
   const r5 = await open(t5, { ...baseOpts(), router: { route: async () => ({ kind: 'new', provider: 'claude', cwd: null, confidence: null, reason: 'inject', latencyMs: 0, costUsd: null, model: null }) } });
-  check('S5 open → opened，在 JevTasks 下建了新目录', r5.action === 'opened' && r5.cwd.startsWith(path.join(D, 'JevTasks') + '/') && fs.statSync(r5.cwd).isDirectory(), JSON.stringify(r5));
+  check('S5 open → opened，在 ntr-tasks 下建了新目录', r5.action === 'opened' && r5.cwd.startsWith(path.join(D, 'ntr-tasks') + '/') && fs.statSync(r5.cwd).isDirectory(), JSON.stringify(r5));
   if (r5.action === 'opened') { own.views.push(r5.viewId); if (r5.sessionId) own.sessions.push(r5.sessionId); saveGuard(); }
   const c5 = r5.action === 'opened' && (await newClaudeInCwd(r5.cwd, 'S5 全新项目'));
   check('S5 原生会话 cwd=新目录、首条输入=正文', !!c5 && c5.cwd === r5.cwd && c5.firstPrompt.trim() === t5);
@@ -241,10 +241,10 @@ try {
   say('\n== 真实路由冒烟（CLI 默认 Router v2：Opus 经 claude -p）==');
   await waitFor(async () => (await holdersOf('claude', A.id))[0]?.state === 'idle', 60000);
   const tSmoke = '接着做 kumquat-ledger 记账工具那个任务，请只回复 OK-SMOKE';
-  const cliEnv = { ...process.env, JEV_WINDOW_ID: String(wid) };
+  const cliEnv = { ...process.env, NTR_WINDOW_ID: String(wid) };
   const cli = (extra, text) => run('node', [path.join(ROOT, 'src/layers/cli.ts'), 'open', '--json', ...extra, '--', text], { env: cliEnv, timeout: 90000 }).then((r) => JSON.parse(r.stdout.trim().split('\n').pop()), (e) => ({ action: 'cli-error', why: String(e.stderr || e.message).slice(0, 300) }));
   const smoke = await cli([], tSmoke);
-  const logLines = fs.readFileSync(path.join(process.env.JEV_HOME, 'entry-log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const logLines = fs.readFileSync(path.join(process.env.NTR_HOME, 'entry-log.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const lastDec = logLines.at(-1)?.decision;
   say(`  决策: kind=${lastDec?.kind} model=${lastDec?.model} latency=${lastDec?.latencyMs}ms cost=${lastDec?.costUsd} 结果=${smoke.action} 候选=${(smoke.options ?? []).map((o) => `${o.sessionId?.slice(0, 8)}:${o.probability}`)}`);
   // 过渡路由拿不准时让人选(clarify)是安全行为；验收是"要么直接送到 A，要么 A 是首选候选(入口预选第 1 个)"
@@ -267,18 +267,18 @@ try {
       fs.rmSync(trace, { force: true });
       fs.writeFileSync(path.join(D, 'entry.out'), '');
       const out = fs.openSync(path.join(D, 'entry.out'), 'a');
-      return spawn(path.join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(ROOT, 'entry/main.cjs')], { env: { ...process.env, JEV_WINDOW_ID: String(wid), JEV_ENTRY_TRACE: trace, JEV_HOTKEY: 'Control+Alt+Space', JEV_ENTRY_CONTROL: 'stdin', ...env }, stdio: ['pipe', out, out], detached: false });
+      return spawn(path.join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(ROOT, 'entry/main.cjs')], { env: { ...process.env, NTR_WINDOW_ID: String(wid), NTR_ENTRY_TRACE: trace, NTR_HOTKEY: 'Control+Alt+Space', NTR_ENTRY_CONTROL: 'stdin', ...env }, stdio: ['pipe', out, out], detached: false });
     };
     const traceEvents = () => (fs.existsSync(trace) ? fs.readFileSync(trace, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
 
     // 不模拟系统按键(需要辅助功能授权，且会敲进用户正在用的 app)：用入口进程的 stdin 控制通道，
     // 走与真实按键相同的渲染进程路径(show → 输入框 → keydown Enter/数字键 → IPC → CLI 子进程)。
     for (const mode of ['real-route', 'clarify']) {
-      const env = mode === 'clarify' ? { openrouter_api_key: '', JEV_ROUTER_API_KEY: '', JEV_ROUTER_BACKEND: 'openrouter' } : {};
+      const env = mode === 'clarify' ? { openrouter_api_key: '', NTR_ROUTER_API_KEY: '', NTR_ROUTER_BACKEND: 'openrouter' } : {};
       const el = startEntry(env);
       const send = (o) => el.stdin.write(JSON.stringify(o) + '\n');
       try {
-        const ready = await waitFor(() => fs.readFileSync(path.join(D, 'entry.out'), 'utf8').includes('jev 入口就绪'), 20000, 300);
+        const ready = await waitFor(() => fs.readFileSync(path.join(D, 'entry.out'), 'utf8').includes('ntr 入口就绪'), 20000, 300);
         check(`入口[${mode}] Electron 启动并注册全局快捷键`, !!ready && traceEvents().some((e) => e.ev === 'registered' && e.registered));
         if (!ready) continue;
         send({ cmd: 'show' });

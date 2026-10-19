@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-providers-'));
-process.env.JEV_HOME = path.join(root, 'jev');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-providers-'));
+process.env.NTR_HOME = path.join(root, 'ntr');
 process.env.CLAUDE_CONFIG_DIR = path.join(root, 'claude');
 process.env.CODEX_HOME = path.join(root, 'codex');
 
@@ -227,7 +227,7 @@ fs.rmSync(path.join(projDir, `${sid(2)}.jsonl`));
 r = await scanClaude();
 check('缓存：文件消失即从索引移除', r.cards.map((c) => c.sessionId), [sid(1)]);
 // 解析规则变了（= 源码哈希变了）→ 旧缓存不得复用，即使文件指纹没变
-const cacheFile = path.join(process.env.JEV_HOME, 'cache', 'claude.json');
+const cacheFile = path.join(process.env.NTR_HOME, 'cache', 'claude.json');
 const saved = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
 check('缓存：版本是源码哈希，不是手写常数', typeof saved.version === 'string' && /^[0-9a-f]{16}$/.test(saved.version), true);
 const [firstKey] = Object.keys(saved.files);

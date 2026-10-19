@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { ntrHome } from './providers/common.ts';
 import type {
   LiveSession,
   OpenOutcome,
@@ -41,9 +42,9 @@ export interface OpenOptions {
   /** 原生"给已有会话排队消息"通道（仅对空闲的存活会话使用，不经按键） */
   queue?: Partial<Record<ProviderId, (sessionId: string, text: string) => Promise<void>>>;
   clipboard?: (text: string) => Promise<void>;
-  /** 入口记录文件；缺省 $JEV_HOME|~/.jev 下的 entry-log.jsonl */
+  /** 入口记录文件；缺省 $NTR_HOME|~/.ntr 下的 entry-log.jsonl */
   logPath?: string;
-  /** 新建会话缺省目录根；缺省 ~/JevTasks（CLI 读 JEV_TASKS_DIR） */
+  /** 新建会话缺省目录根；缺省 ~/ntr-tasks（CLI 读 NTR_TASKS_DIR） */
   tasksRoot?: string;
   /** 新开视图后等待原生写出会话 id 的最长毫秒数（用于填 sessionId 与下一句的语境） */
   settleMs?: number;
@@ -93,12 +94,10 @@ export function pendingDraft(tail: string): string | null {
   return null;
 }
 
-export function jevHome(): string {
-  return process.env.JEV_HOME || path.join(os.homedir(), '.jev');
-}
+export { ntrHome };
 
 export function entryLogPath(): string {
-  return path.join(jevHome(), 'entry-log.jsonl');
+  return path.join(ntrHome(), 'entry-log.jsonl');
 }
 
 export function pbcopy(text: string): Promise<void> {
@@ -270,7 +269,7 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       if (!provider) return await failed(`没有 ${decision.provider} 的 Provider`);
       // 不预先检查目录是否存在：项目常在 ~/Desktop、~/Documents 下，stat 会触发 macOS 文件夹授权弹框，被拒时还会误判为不存在。
       // 命令是 `cd <目录> && …`，目录不在时 claude 不会启动，iTerm 里能看到报错，正文也在那条命令里。
-      const cwd = decision.cwd ?? newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'JevTasks'), text);
+      const cwd = decision.cwd ?? newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'ntr-tasks'), text);
       const view = await opts.surface.openView(cwd, provider.newArgv(text), { windowId: opts.windowId });
       const sessionId = await settle(provider, view, opts.settleMs ?? 2500);
       return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd });

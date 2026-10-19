@@ -73,7 +73,7 @@ export type RouterV2Result = RouteDecision & {
 
 export interface RouterV2Options {
   policy?: Partial<RouterV2Policy>;
-  /** 注入模型调用（评测/契约）；缺省走本机 `claude -p`（JEV_ROUTER_BACKEND=openrouter 时走 OpenRouter） */
+  /** 注入模型调用（评测/契约）；缺省走本机 `claude -p`（NTR_ROUTER_BACKEND=openrouter 时走 OpenRouter） */
   complete?: Complete;
   now?: () => number;
   env?: Record<string, string | undefined>;
@@ -285,7 +285,7 @@ export function gate(parsed: Array<Parsed | null>, policy: Pick<RouterV2Policy, 
 // ---------- OpenRouter ----------
 export function openRouterComplete(env: Record<string, string | undefined>): Complete {
   return async (req) => {
-    const key = env.JEV_ROUTER_API_KEY ?? env.openrouter_api_key;
+    const key = env.NTR_ROUTER_API_KEY ?? env.openrouter_api_key;
     if (!key) return { text: '', costUsd: null, error: 'no api key' };
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -317,7 +317,7 @@ export function claudeCliComplete(bin = 'claude'): Complete {
   let cwd: string | null = null;
   return (req) =>
     new Promise((resolve) => {
-      cwd ??= fs.mkdtempSync(path.join(os.tmpdir(), 'jev-router-'));
+      cwd ??= fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-router-'));
       const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
       const user = req.messages.filter((m) => m.role === 'user').map((m) => m.content).join('\n');
       let out = '';
@@ -345,9 +345,9 @@ export function claudeCliComplete(bin = 'claude'): Complete {
 export function createRouterV2(opts: RouterV2Options = {}): Router {
   const policy: RouterV2Policy = { ...DEFAULT_POLICY, ...opts.policy };
   const env = opts.env ?? process.env;
-  // 路由模型可替换：JEV_ROUTER_MODEL 指定模型（claude -p 的别名如 sonnet，或 OpenRouter 模型名如 deepseek/deepseek-v4.1-flash）
-  if (env.JEV_ROUTER_MODEL) policy.models = policy.models.map((m, i) => (i === 0 ? { ...m, model: env.JEV_ROUTER_MODEL! } : m));
-  const viaOpenRouter = !opts.complete && env.JEV_ROUTER_BACKEND === 'openrouter';
+  // 路由模型可替换：NTR_ROUTER_MODEL 指定模型（claude -p 的别名如 sonnet，或 OpenRouter 模型名如 deepseek/deepseek-v4.1-flash）
+  if (env.NTR_ROUTER_MODEL) policy.models = policy.models.map((m, i) => (i === 0 ? { ...m, model: env.NTR_ROUTER_MODEL! } : m));
+  const viaOpenRouter = !opts.complete && env.NTR_ROUTER_BACKEND === 'openrouter';
   const complete = opts.complete ?? (viaOpenRouter ? openRouterComplete(env) : claudeCliComplete());
   // OpenRouter 后端用同一个模型的 OpenRouter 名称（`claude -p` 的别名 opus/sonnet 在那里无效）
   if (viaOpenRouter) policy.models = policy.models.map((m) => (m.model.includes('/') ? m : { ...m, model: `anthropic/claude-${m.model}-5.5` }));

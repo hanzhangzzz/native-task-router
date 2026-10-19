@@ -1,6 +1,6 @@
-// jev CLI：`node src/layers/cli.ts open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex] [--focused-tty /dev/ttysN]`
+// ntr CLI：`node src/layers/cli.ts open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex] [--focused-tty /dev/ttysN]`
 // 另有 `sessions`（卡片摘要）、`live`（存活映射）。入口窗口（entry/main.cjs）以子进程调用 `open --json`。
-// 测试隔离：--window-id N（或 JEV_WINDOW_ID）把新 tab 开进指定 iTerm 窗口。
+// 测试隔离：--window-id N（或 NTR_WINDOW_ID）把新 tab 开进指定 iTerm 窗口。
 import { claude } from './providers/claude.ts';
 import { codex } from './providers/codex.ts';
 import { codexQueue } from './providers/codex-queue.ts';
@@ -16,15 +16,15 @@ import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './t
 // 否则会传给所有子进程：冷启动的 iTerm 及其中每个 shell 都会带上它，在里面启动的 Electron 程序全被当成 Node 运行。
 delete process.env.ELECTRON_RUN_AS_NODE;
 
-// JEV_ONLY_UNDER=<目录>：只路由这个目录下的会话（演示、录屏、教程用，避免真实会话出镜）
-const onlyUnder = process.env.JEV_ONLY_UNDER ? process.env.JEV_ONLY_UNDER.replace(/\/+$/, '') + '/' : null;
+// NTR_ONLY_UNDER=<目录>：只路由这个目录下的会话（演示、录屏、教程用，避免真实会话出镜）
+const onlyUnder = process.env.NTR_ONLY_UNDER ? process.env.NTR_ONLY_UNDER.replace(/\/+$/, '') + '/' : null;
 const providers: Provider[] = [claude, codex].map((p) =>
   onlyUnder ? { ...p, listSessions: async () => (await p.listSessions()).filter((c) => (c.cwd + '/').startsWith(onlyUnder)) } : p,
 );
 
-/** 默认 Router v3（项目优先，经本机 `claude -p`）；JEV_ROUTER=v2 退回会话级路由，=interim 退回过渡路由（需要 OpenRouter key）。 */
+/** 默认 Router v3（项目优先，经本机 `claude -p`）；NTR_ROUTER=v2 退回会话级路由，=interim 退回过渡路由（需要 OpenRouter key）。 */
 async function pickRouter(): Promise<Router> {
-  const r = process.env.JEV_ROUTER;
+  const r = process.env.NTR_ROUTER;
   return r === 'interim' ? interimRouter : r === 'v2' ? createRouterV2() : createRouterV3();
 }
 const isProvider = (s: string): s is ProviderId => s === 'claude' || s === 'codex';
@@ -89,7 +89,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (cmd !== 'open') {
-    console.error('用法: jev open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history');
+    console.error('用法: ntr open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history');
     return 2;
   }
 
@@ -99,7 +99,7 @@ async function main(): Promise<number> {
   const newRaw = flag(args, '--new');
   const newCwd = flag(args, '--cwd');
   const focusedTty = flag(args, '--focused-tty') ?? null;
-  const win = flag(args, '--window-id') ?? process.env.JEV_WINDOW_ID;
+  const win = flag(args, '--window-id') ?? process.env.NTR_WINDOW_ID;
   const text = (literal ?? args).join(' ').trim();
   if (!text) {
     console.error('缺少要发送的文字');
@@ -129,7 +129,7 @@ async function main(): Promise<number> {
     focusedTty,
     windowId: win ? Number(win) : undefined,
     queue: { codex: g.queue },
-    tasksRoot: process.env.JEV_TASKS_DIR || undefined,
+    tasksRoot: process.env.NTR_TASKS_DIR || undefined,
   });
   const cards = outcome.action === 'clarify' || ('sessionId' in outcome && outcome.sessionId) ? (await Promise.all(providers.map((p) => p.listSessions()))).flat() : [];
   const card = (p: ProviderId, id: string | null) => cards.find((c) => c.provider === p && c.sessionId === id);

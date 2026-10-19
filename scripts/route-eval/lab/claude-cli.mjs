@@ -10,7 +10,7 @@ import { LAB_DIR } from './llm.mjs';
 
 const CACHE = path.join(LAB_DIR, 'cli-cache');
 fs.mkdirSync(CACHE, { recursive: true });
-const CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'jev-route-cli-'));
+const CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-route-cli-'));
 
 export function claudeCli({ model, system, user, timeoutMs = 60_000 }) {
   const key = crypto.createHash('sha256').update(JSON.stringify({ model, system, user })).digest('hex');
