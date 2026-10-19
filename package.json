@@ -16,7 +16,7 @@
     "providers:contracts": "node scripts/layers-providers.contracts.mjs",
     "iterm:contracts": "node scripts/layers-iterm.contracts.mjs",
     "open:contracts": "node scripts/layers-open.contracts.mjs",
-    "router:contracts": "node scripts/route-eval/contracts-router-v2.mjs",
+    "router:contracts": "node scripts/route-eval/contracts-router-v2.mjs && node scripts/route-eval/contracts-router-v3.mjs",
     "entry:ux": "node scripts/entry-ux.live.mjs",
     "iterm:live": "node scripts/layers-iterm.live.mjs",
     "open:live": "node scripts/layers-open.live.mjs",

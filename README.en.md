@@ -86,15 +86,16 @@ New sessions go to `~/JevTasks/<short name>-<number>`; set `JEV_TASKS_DIR` to us
 ## How it works
 
 ```
-sentence ─▶ local session index ─▶ candidates ─▶ model decision ─▶ gate ─┬─▶ type into the open iTerm tab
-                                                                        ├─▶ new tab: claude -r / codex resume
-                                                                        └─▶ new tab: new session
+sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a project ─▶ gate ─▶ pick a session in it ─┬─▶ type into the open iTerm tab
+                                                                                                        ├─▶ new tab: claude -r / codex resume
+                                                                                                        └─▶ new tab: new session in that project dir
 ```
 
 - **Index**: reads native history directly (`~/.claude/projects`, `~/.codex/sessions`) and keeps only interactive sessions, excluding `claude -p`, `codex exec`, subagents, and temp-dir probes. The cache is incremental, so a warm refresh takes tens of milliseconds.
-- **Candidates**: the 15 most recently active sessions, plus the 15 that best match the sentence's words, plus the session your previous sentence went to, the one you were looking at when you opened the entry, and the ones open in a terminal.
-- **Decision**: each candidate becomes a small card (title, first message, last two messages, a snippet of the last reply, project, last activity). The cards and your previous sentence go to the model, which returns a destination, a confidence, and its top three.
-- **Gate**: it auto-sends only when confidence is ≥ 0.9 and the sentence has real content ("continue" or "ok" doesn't count). Otherwise it lists the top three with the first one preselected, so Enter sends it. Model errors and timeouts never auto-send.
+- **Project first, then session**: sessions are grouped by project directory (the 40 most recently active projects). Each project becomes a small card (directory name, last activity, what its recent sessions were about, a snippet of the last reply). The cards, your previous sentence, and the sessions you are looking at or have open go to the model, which only answers "which project does this sentence belong to" (or none of them), with a confidence and its top three. What you want is to land in the right project, where CLAUDE.md, memory, and the whole history live; which session to continue is decided by deterministic rules.
+- **Picking a session inside the project**: if exactly one session of that project is open in a terminal, it types into that one. Otherwise, if the project's latest session was active within 24 hours, it resumes it natively. If it's older, it starts a new session in that project directory (Claude Code / Codex load memory and CLAUDE.md themselves). Only when several sessions are open and it can't tell them apart does it ask you.
+- **Gate**: it auto-sends only when the project confidence is ≥ 0.85. Otherwise it lists the top three destinations with the first one preselected, so Enter sends it. Model errors and timeouts never auto-send.
+- **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it continues the session you were looking at when you opened the entry; failing both, it lists the open sessions. This path takes tens of milliseconds.
 - **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, that the session is idle, and that the screen shows no approval prompt and no half-typed draft of yours. If any check fails, it only switches to the tab and copies your sentence to the clipboard. It never starts a second process on a session that is already running.
 - **iTerm not running**: it starts iTerm first; if iTerm opens its own blank window on launch, the session goes into that window instead of leaving an empty tab behind.
 
@@ -102,15 +103,15 @@ sentence ─▶ local session index ─▶ candidates ─▶ model decision ─�
 
 The short version: **it would rather make you press Enter once more than send your message to the wrong place.**
 
-Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese):
+Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Sending to the wrong project is a hard error; landing in the right project but a different session than the one you had in mind is a soft one (a continuation within the same project, which a human might also pick).
 
-- A 240-sample held-out set, run once: 22 messages auto-sent, **none to the wrong session**.
-- To be honest, only about one in ten auto-sends. Most of the time you still press Enter to confirm.
-- When it asks, the preselected first option is right about two-thirds of the time. The top three contain the right destination about 77% of the time on held-out data (about 90% on the dev set).
-- Contentless follow-ups like "continue" or "tweak that" are the hardest. They never auto-send, and the entry tells the model which session you were looking at to help pick the right one.
-- Each decision takes 3–7 seconds, mostly `claude -p` startup and Opus inference.
+- Project-first routing (current version), 145-sample dev subset: the model picks the right project 71% of the time, and the right project is in its top three 91% of the time. At confidence ≥ 0.85 it auto-sends 37% of messages with 1 wrong project (a message that should have started a new task was filed under another project); at ≥ 0.9 it auto-sends 23% with 0 wrong.
+- Once the project is right, "the project's latest session" is the correct destination 90% of the time (287 continuation samples in the dev set).
+- 31% of these samples are contentless follow-ups like "continue" or "ok". In the product they take the model-free fast path (previous destination / the session you were looking at). The historical data has neither signal, so the fast path's accuracy is not yet measured; only the rules are.
+- The previous session-level router on the held-out set (240 samples, run once): 9% auto-sent, 0 wrong sessions. The new version has not been run on the held-out set yet.
+- Each decision takes 3–7 seconds, mostly `claude -p` startup and Opus inference; the fast path takes tens of milliseconds.
 
-The sample is small. These numbers show no auto-sent mistakes on this data; they don't prove a low error rate.
+The sample is small. These numbers show almost no auto-sent mistakes on this data; they don't prove a low error rate.
 
 ## Swappable routing model
 
