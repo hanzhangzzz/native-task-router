@@ -2,13 +2,13 @@
 
 **Press a hotkey, say one sentence, and pick up the AI session you left off in.**
 
-**[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [中文](README.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ Download for macOS](https://github.com/hanzhangzzz/native-task-router/releases/latest)** (Apple silicon) · [中文](README.md) · macOS + iTerm2 / Terminal · Claude Code / Codex · MIT
 
 https://github.com/user-attachments/assets/452dcc6b-ce93-49bc-bbd7-7a03b07bc4b4
 
 **A fresh AI session starts with amnesia.** The most complete context lives in the native session log, and `claude -r` / `codex resume` restore it exactly. The hard part is remembering where that session is.
 
-Native Task Router remembers for you. It searches every Claude Code and Codex session on your Mac, finds the one this sentence belongs to, and continues it in your own iTerm. If nothing fits, it starts a new one.
+Native Task Router remembers for you. It searches every Claude Code and Codex session on your Mac, finds the one this sentence belongs to, and continues it in your own iTerm or Terminal. If nothing fits, it starts a new one.
 
 ```
 Before   You remember "the rate-limit work isn't done"
@@ -17,8 +17,8 @@ Before   You remember "the rate-limit work isn't done"
          → scroll a long session list, find it, type your message
 
 Now      ⌃⌥Space → "add a per-user quota to the rate limiter" → Enter
-         → if that session is open, switch to its iTerm tab and type it there
-         → if not, open a new tab and resume it natively, full context intact
+         → if that session is open, switch to its tab (iTerm or Terminal) and type it there
+         → if not, open a new tab (a new window in Terminal) and resume it natively, full context intact
 ```
 
 Try it with zero risk first. This only tells you where the sentence would go and touches no session:
@@ -33,7 +33,7 @@ npm run ntr -- route "add a per-user quota to the rate limiter"
 | --- | --- | --- |
 | Finding the session | Remember the directory and the tool, `cd` there, scroll the resume list | Say one sentence; it searches across projects and across Claude Code / Codex |
 | Context | A new session, or memory and summaries, all of them compressed | Native resume, the full session log |
-| Interface | Learn yet another desktop app | Your iTerm and the native TUI; approvals and tools work as before |
+| Interface | Learn yet another desktop app | Your iTerm / Terminal and the native TUI; approvals and tools work as before |
 | Wrong destination | Can't happen, you did it yourself | When unsure, it asks you to pick. In a 240-sample held-out eval, no auto-sent message went to the wrong session |
 
 **It doesn't compete with Claude Code or Codex.** It runs no agent, hosts no terminal, and never approves anything for you. It only decides where a sentence should go. The better they get, the more useful it gets, and the routing model itself is swappable.
@@ -54,13 +54,13 @@ Then continue from step 2. Upgrade later with `brew upgrade --cask native-task-r
 1. Download `Native-Task-Router-<version>-arm64.dmg` from [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) and drag the app into Applications. Apple silicon only for now.
 2. **macOS blocks the first launch**: the app is not notarized (the author has no Developer ID). Open System Settings → Privacy & Security and click "Open Anyway" near the bottom, or run `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`.
 3. It then lives in the menu bar (a small speech bubble with an arc to a star) and starts at login by default. Press **Control+Option+Space** to open the input box; the menu lets you change the hotkey, turn off start-at-login, or quit.
-4. On first use, macOS may ask whether it may control iTerm and System Events. Allow it: that's how it finds the tab you're looking at and types into it.
+4. On first use, macOS may ask whether it may control iTerm (or Terminal) and System Events. Allow it: that's how it finds the tab you're looking at and types into it.
 
-You still need iTerm2 and a logged-in Claude Code (`claude`, used for routing); resuming Codex sessions needs a logged-in `codex`.
+You still need iTerm2 or the built-in Terminal, and a logged-in Claude Code (`claude`, used for routing); resuming Codex sessions needs a logged-in `codex`.
 
 ## Run from source
 
-**Requirements**: macOS, [iTerm2](https://iterm2.com), Node.js ≥ 24 (tested on 25.5), and a logged-in [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on PATH). Resuming Codex sessions also needs a logged-in `codex`.
+**Requirements**: macOS, [iTerm2](https://iterm2.com) or the built-in Terminal, Node.js ≥ 24 (tested on 25.5), and a logged-in [Claude Code](https://docs.claude.com/en/docs/claude-code) (`claude` on PATH). Resuming Codex sessions also needs a logged-in `codex`.
 
 > By default, routing runs `claude -p --model opus` on your machine, using your own Claude subscription; no extra API key is needed. Each decision sends short snippets of candidate sessions to Anthropic; see [Data and privacy](#data-and-privacy).
 
@@ -97,7 +97,7 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 ## How it works
 
 ```
-sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a project ─▶ gate ─▶ pick a session in it ─┬─▶ type into the open iTerm tab
+sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a project ─▶ gate ─▶ pick a session in it ─┬─▶ type into the open terminal tab
                                                                                                         ├─▶ new tab: claude -r / codex resume
                                                                                                         └─▶ new tab: new session in that project dir
 ```
@@ -108,6 +108,8 @@ sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a 
 - **Gate**: it auto-sends only when the project confidence is ≥ 0.85. Otherwise it lists the top three destinations with the first one preselected, so Enter sends it. Model errors and timeouts never auto-send.
 - **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it continues the session you were looking at when you opened the entry; failing both, it lists the open sessions. This path takes tens of milliseconds.
 - **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, that the session is idle, and that the screen shows no approval prompt and no half-typed draft of yours. If any check fails, it only switches to the tab and copies your sentence to the clipboard. It never starts a second process on a session that is already running.
+- **Which terminal a new session opens in**: the one you were looking at when you opened the input box; otherwise the one that is running (iTerm if both are); if neither is running, iTerm, or Terminal when iTerm isn't installed. Set `NTR_TERMINAL=iterm` or `NTR_TERMINAL=terminal` to pin it.
+- **Terminal opens a new window**: Terminal's scripting interface can only open windows; a tab would need simulated keystrokes that steal focus, so it doesn't. If Terminal isn't running, it is started in the background without an extra blank window.
 - **iTerm not running**: it starts iTerm first; if iTerm opens its own blank window on launch, the session goes into that window instead of leaving an empty tab behind.
 
 ## How accurate is it?
@@ -141,7 +143,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 
 ## Known limitations
 
-- macOS + iTerm2 only. Sessions open in other terminals can't be typed into; you get a notice and the sentence is copied to your clipboard.
+- macOS with iTerm2 or Terminal only. Sessions open in other terminals such as Ghostty or Warp can't be typed into; you get a notice and the sentence is copied to your clipboard.
 - Claude Code keeps 30 days of history by default, so older sessions can't be resumed.
 - A Codex session started with `--remote` can't be detected as running.
 - Routing needs a logged-in `claude`, and it is slow (see above).
@@ -156,13 +158,14 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 ## Development
 
 ```bash
-npm test                                 # type check + all offline contracts (no iTerm, no model calls)
+npm test                                 # type check + all offline contracts (no terminal, no model calls)
 scripts/fresh-install.sh                 # clean clone → npm ci → npm test → read sessions → one real routing decision
 npm run entry:ux                         # entry UI acceptance (real window + stub CLI, sends nothing real)
 NTR_LIVE_ITERM=1 npm run open:live       # real iTerm end-to-end: opens a test window in your iTerm and runs real claude/codex; off by default
+NTR_LIVE_TERMINAL=1 npm run terminal:live  # real Terminal acceptance: tests only in Terminal windows it opens, closes them one by one; off by default
 ```
 
-The layered code is in [`src/layers/`](src/layers): `providers/` (who owns a session: claude, codex), `surfaces/` (where it is shown: iterm), `router/` (deciding the destination), and `open.ts` (orchestration). The entry is in [`entry/`](entry). The contract between layers is [`src/layers/types.ts`](src/layers/types.ts).
+The layered code is in [`src/layers/`](src/layers): `providers/` (who owns a session: claude, codex), `surfaces/` (where it is shown: iterm, terminal, with multi dispatching between them), `router/` (deciding the destination), and `open.ts` (orchestration). The entry is in [`entry/`](entry). The contract between layers is [`src/layers/types.ts`](src/layers/types.ts).
 
 ## License
 

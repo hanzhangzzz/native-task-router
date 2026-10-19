@@ -86,11 +86,12 @@ function osa(script) {
   });
 }
 
-/** 唤起前的前台 app 是 iTerm 时，读它当前 session 的 tty（给 Router 做"正在看哪个会话"的语境）。 */
-async function frontIterm() {
+/** 唤起前的前台 app 是 iTerm 或 Terminal 时，读它当前会话的 tty（给 Router 做"正在看哪个会话"的语境，也决定新会话开在哪个终端）。 */
+async function frontTerminalTty() {
   const front = await osa('tell application "System Events" to get bundle identifier of first application process whose frontmost is true');
-  if (front !== 'com.googlecode.iterm2') return null;
-  return (await osa('tell application "iTerm" to get tty of current session of current window')) || null;
+  if (front === 'com.googlecode.iterm2') return (await osa('tell application "iTerm" to get tty of current session of current window')) || null;
+  if (front === 'com.apple.Terminal') return (await osa('tell application "Terminal" to get tty of selected tab of front window')) || null;
+  return null;
 }
 
 function runCli(args) {
@@ -139,7 +140,7 @@ function hide() {
 }
 
 async function show() {
-  focusedTty = await frontIterm();
+  focusedTty = await frontTerminalTty();
   clearTimeout(hideTimer);
   const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   win.setPosition(Math.round(workArea.x + (workArea.width - WIDTH) / 2), Math.round(workArea.y + workArea.height * 0.18));

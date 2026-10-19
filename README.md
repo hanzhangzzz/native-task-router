@@ -2,13 +2,13 @@
 
 **按一个快捷键，说一句话，接着上次那个 AI 会话干活。**
 
-**[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [English](README.en.md) · macOS + iTerm2 · Claude Code / Codex · MIT
+**[⬇ 下载 macOS 版](https://github.com/hanzhangzzz/native-task-router/releases/latest)**（Apple 芯片）· [English](README.en.md) · macOS + iTerm2 / Terminal · Claude Code / Codex · MIT
 
 https://github.com/user-attachments/assets/49388d4e-e07b-49d3-ab77-c110e12bdafe
 
 **新开一个 AI 会话，等于让它失忆。** 最完整的上下文就在原生会话记录里，`claude -r` 和 `codex resume` 能把它原样恢复。难的是记住它在哪。
 
-Native Task Router 替你记。它在你本机所有 Claude Code / Codex 会话里，找到这句话该去的那个，在你自己的 iTerm 里续上；没有合适的，就新开一个。
+Native Task Router 替你记。它在你本机所有 Claude Code / Codex 会话里，找到这句话该去的那个，在你自己的 iTerm 或 Terminal 里续上；没有合适的，就新开一个。
 
 ```
 以前   想起"限流那块还没做完"
@@ -17,8 +17,8 @@ Native Task Router 替你记。它在你本机所有 Claude Code / Codex 会话�
        → 在一长串会话里找到它，再把话敲进去
 
 现在   ⌃⌥Space → "限流那块再加一个按用户维度的配额" → 回车
-       → 那个会话正开着，就切到它的 iTerm 标签页写进去
-       → 没开着，就新开一个标签页，用原生 resume 带着完整上下文续上
+       → 那个会话正开着，就切到它的标签页写进去（iTerm 或 Terminal）
+       → 没开着，就新开一个标签页（Terminal 里是新窗口），用原生 resume 带着完整上下文续上
 ```
 
 先零风险试一下，它只告诉你会发去哪，不碰任何会话：
@@ -33,7 +33,7 @@ npm run ntr -- route "限流那块再加一个按用户维度的配额"
 | --- | --- | --- |
 | 找到会话 | 记住项目目录和工具，`cd` 进去，再翻 resume 列表 | 说一句话，跨项目、跨 Claude Code / Codex 一起找 |
 | 上下文 | 新开会话，或者靠记忆、摘要，都是压缩过的 | 原生 resume，完整的会话记录 |
-| 界面 | 换一个新桌面 app，重新学一遍 | 还是你的 iTerm 和原生 TUI，审批、工具照旧 |
+| 界面 | 换一个新桌面 app，重新学一遍 | 还是你的 iTerm / Terminal 和原生 TUI，审批、工具照旧 |
 | 送错怎么办 | 不存在，因为全靠你自己 | 拿不准就让你选；240 条留出评测里自动送达没有一次送错 |
 
 **它不和 Claude Code、Codex 抢饭碗。** 不跑 Agent，不托管终端，不替你批审批，只负责"这句话该去哪"。它们越强，它越好用；判断去处的路由模型也可以换。
@@ -54,13 +54,13 @@ brew install --cask hanzhangzzz/tap/native-task-router
 1. 从 [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) 下载 `Native-Task-Router-<版本>-arm64.dmg`，把应用拖进"应用程序"。目前只有 Apple 芯片版本。
 2. **第一次打开会被 macOS 拦下**：应用没有经过苹果公证（作者没有开发者证书）。打开"系统设置 → 隐私与安全性"，在页面下方点"仍要打开"。也可以在终端执行 `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`。
 3. 打开后它常驻在菜单栏（图标是一个小气泡连到一颗星），默认开机自动启动。按 **Control+Option+Space** 唤起输入框；菜单里可以改快捷键、关掉开机启动、退出。
-4. 第一次使用时，macOS 可能会询问是否允许它控制 iTerm 和"系统事件"，点允许：它要据此找到你正在看的标签页，并把话写进去。
+4. 第一次使用时，macOS 可能会询问是否允许它控制 iTerm（或 Terminal）和"系统事件"，点允许：它要据此找到你正在看的标签页，并把话写进去。
 
-同样需要：iTerm2、已登录的 Claude Code（`claude`，用来判断去处）；续 Codex 会话需要已登录的 `codex`。
+同样需要：iTerm2 或 macOS 自带的 Terminal、已登录的 Claude Code（`claude`，用来判断去处）；续 Codex 会话需要已登录的 `codex`。
 
 ## 从源码运行
 
-**前置条件**：macOS、[iTerm2](https://iterm2.com)、Node.js ≥ 24（已在 25.5 上测试）、已登录的 [Claude Code](https://docs.claude.com/en/docs/claude-code)（`claude` 在 PATH 里）。要续 Codex 会话，还需要已登录的 `codex`。
+**前置条件**：macOS、[iTerm2](https://iterm2.com) 或自带的 Terminal、Node.js ≥ 24（已在 25.5 上测试）、已登录的 [Claude Code](https://docs.claude.com/en/docs/claude-code)（`claude` 在 PATH 里）。要续 Codex 会话，还需要已登录的 `codex`。
 
 > 默认用你本机的 `claude -p --model opus` 判断去处，走你自己的 Claude 订阅，不需要额外的 API key。每次判断会把候选会话的摘要片段发给 Anthropic，详见[数据与隐私](#数据与隐私)。
 
@@ -106,7 +106,7 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 ## 它怎么工作
 
 ```
-一句话 ─▶ 本机会话索引 ─▶ 按项目归组 ─▶ Opus 选项目 ─▶ 闸门 ─▶ 项目内选会话 ─┬─▶ 写进正开着的 iTerm 标签页
+一句话 ─▶ 本机会话索引 ─▶ 按项目归组 ─▶ Opus 选项目 ─▶ 闸门 ─▶ 项目内选会话 ─┬─▶ 写进正开着的终端标签页
                                                                       ├─▶ 新标签页 claude -r / codex resume
                                                                       └─▶ 新标签页在该项目目录新建
 ```
@@ -117,6 +117,8 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 - **闸门**：对项目的置信度 ≥ 0.85 才自动送达，否则列出前三个去处，预选第一个，回车就送。模型出错、超时，一律不自动。
 - **短句不调模型**："继续""好的"这类没有内容的话，5 分钟内刚从入口发过一句就续那个会话；否则续你唤起入口时正看着的会话；两者都没有就列出开着的会话让你选。这条路几十毫秒。
 - **送达前再核对一次**：要写进已开着的标签页，先确认"标签页 → 进程 → 会话"还是那个、会话空闲、屏幕上没有审批框，也没有你打了一半的草稿。任何一条不满足，就只切过去，把这句话放进剪贴板。同一个会话已经在跑，就绝不再开第二个进程去写它。
+- **新会话开在哪个终端**：唤起输入框时你正看着的那个终端；否则开着的那个（两个都开着选 iTerm）；都没开就用 iTerm，没装 iTerm 才用 Terminal。设 `NTR_TERMINAL=iterm` 或 `NTR_TERMINAL=terminal` 可以固定。
+- **Terminal 是新开窗口**：Terminal 的脚本接口只能新开窗口，开标签页得模拟按键，会抢焦点，所以不做。Terminal 没开着时在后台启动它，不多开空白窗口。
 - **iTerm 没开着**：先把它启动；如果它启动时自带一个空白窗口，就直接在那个窗口里续上或新建，不多留空标签页。
 
 ## 路由准不准
@@ -150,7 +152,7 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 ## 已知限制
 
-- 只支持 macOS + iTerm2。在别的终端里开着的会话写不进去，只会提示你，并把这句话放进剪贴板。
+- 只支持 macOS 上的 iTerm2 和 Terminal。在 Ghostty、Warp 等其它终端里开着的会话写不进去，只会提示你，并把这句话放进剪贴板。
 - Claude Code 默认只保留 30 天历史，更早的会话续不上。
 - Codex 用 `--remote` 新建的会话，判断不了它是否还在运行。
 - 判断依赖 `claude` 已登录，而且偏慢（见上）。
@@ -164,13 +166,14 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 ## 开发
 
 ```bash
-npm test                                 # 类型检查 + 全部离线契约（不碰 iTerm、不调模型）
+npm test                                 # 类型检查 + 全部离线契约（不碰终端、不调模型）
 scripts/fresh-install.sh                 # 从零安装自检：干净克隆 → npm ci → npm test → 读会话 → 一次真实判断
 npm run entry:ux                         # 入口界面验收（真实窗口 + 桩 CLI，不发真实消息）
 NTR_LIVE_ITERM=1 npm run open:live       # 真实 iTerm 端到端：会在你的 iTerm 里建测试窗口、跑真实 claude/codex，默认不运行
+NTR_LIVE_TERMINAL=1 npm run terminal:live  # 真实 Terminal 验收：只在自己新开的 Terminal 窗口里测，收尾逐个关闭，默认不运行
 ```
 
-分层代码在 [`src/layers/`](src/layers)：`providers/`（谁持有会话：claude、codex）、`surfaces/`（在哪展示：iterm）、`router/`（判断去处）、`open.ts`（编排）；入口在 [`entry/`](entry)。各层之间的合同见 [`src/layers/types.ts`](src/layers/types.ts)。
+分层代码在 [`src/layers/`](src/layers)：`providers/`（谁持有会话：claude、codex）、`surfaces/`（在哪展示：iterm、terminal，multi 负责分发）、`router/`（判断去处）、`open.ts`（编排）；入口在 [`entry/`](entry)。各层之间的合同见 [`src/layers/types.ts`](src/layers/types.ts)。
 
 ## 许可
 
