@@ -40,6 +40,17 @@ npm run ntr -- route "add a per-user quota to the rate limiter"
 
 ## Download
 
+**With Homebrew**:
+
+```bash
+brew trust hanzhangzzz/tap                              # third-party taps must be trusted first; some Homebrew versions refuse them otherwise
+brew install --cask hanzhangzzz/tap/native-task-router
+```
+
+Then continue from step 2. Upgrade later with `brew upgrade --cask native-task-router`.
+
+**Or download the dmg by hand**:
+
 1. Download `Native-Task-Router-<version>-arm64.dmg` from [Releases](https://github.com/hanzhangzzz/native-task-router/releases/latest) and drag the app into Applications. Apple silicon only for now.
 2. **macOS blocks the first launch**: the app is not notarized (the author has no Developer ID). Open System Settings → Privacy & Security and click "Open Anyway" near the bottom, or run `xattr -dr com.apple.quarantine "/Applications/Native Task Router.app"`.
 3. It then lives in the menu bar (a small speech bubble with an arc to a star) and starts at login by default. Press **Control+Option+Space** to open the input box; the menu lets you change the hotkey, turn off start-at-login, or quit.
