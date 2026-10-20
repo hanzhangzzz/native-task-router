@@ -14,13 +14,15 @@
 // （句子里明确点名 codex / claude 时用点名的）；NEW_PROJECT → 新目录。
 // 任何模型失败一律不自动；无论自动与否都给出前 3 个去处，入口预选第 1 个。
 //
-// 闸门（v3.2）：模型分别给"项目置信度"和"线程置信度"。档位只看项目置信度（与 v3.0 同口径），线程只决定投递方式：
-//   - projectConfidence < forkConfidence（默认 0.85）→ clarify，候选为模型排好的项目各自的首选线程/新建；
+// 闸门（v3.2）：模型分别给"项目置信度"和"线程置信度"。档位看项目置信度（与 v3.0 同口径），线程置信度另设一道闸：
+//   - 项目置信度 < forkConfidence（默认 0.85；NEW 用 newConfidence，默认等于 forkConfidence）→ clarify；
+//   - 线程置信度 < threadConfidence（默认 0.7，NTR_ROUTER_THREAD_CONFIDENCE）→ clarify，候选按模型排好的项目各自的首选线程/新建；
+//     NEW 决策的线程置信度就是模型对"该新开"的把握，同样过这道闸；
 //   - thread = NEW → 在该项目新建（NEW_PROJECT 则新目录），open.ts 在正文前加"自动新建在项目 X"的路由说明，不分叉；
-//   - thread = 某线程，projectConfidence ≥ minConfidence（默认 0.95）且 threadConfidence ≥ threadConfidence（默认 0.85）→ direct：写进/续接原会话；
+//   - thread = 某线程，项目 ≥ minConfidence（默认 0.95）且线程 ≥ directThreadConfidence（0.85）→ direct：写进/续接原会话；
 //   - thread = 某线程，其余自动情形 → fork：从原会话分叉，原会话不动，正文前加路由说明。
-// 为什么拆开（2026-10-20，见研究文档「Router v3.1」）：v3.1 让一个置信度同时描述项目和线程，项目本来有把握的样本被线程的
-// 不确定拖低，dev 自动率从 37.6% 掉到 14.8%；线程选错只该影响"直接还是分叉"，不该压低自动率。
+// 为什么拆开（2026-10-20，见研究文档「Router v3.1」「Router v3.2」）：v3.1 让一个置信度同时描述项目和线程，项目本来有把握的
+// 样本被线程的不确定拖低，dev 自动率从 37.6% 掉到 14.8%。线程阈值 0.7 是在 dev 上预先定的：分叉档全对 77% → 86.5%，自动率 36.5% → 26.1%。
 // 快路径始终 direct。
 import type { ProviderId, RouteContext, RouteOption, Router, RouteDecision, SessionCard, LiveSession } from '../types.ts';
 import { ago, cardKey, claudeCliComplete, cleanReply, contentFree, noiseTitle, openRouterComplete, redact } from './v2.ts';
@@ -29,7 +31,7 @@ import type { Complete, CompleteRequest, CompleteResult } from './v2.ts';
 // v3.0-project-first-opus-t0.85 → v3.1：模型同时选项目与项目内线程（或 NEW），删除项目内选会话的固定规则（pickInProject、24h 续接窗）；
 // v3.2：项目置信度与线程置信度分开，档位只看项目置信度（0.95 / 0.85），线程置信度 ≥0.85 才直接写入原会话；自动新建加路由说明；
 // 快路径不再自动承接正看着的会话，改为让人确认。
-export const ROUTER_V3_VERSION = 'v3.2-split-conf-opus-k4w14-p95f85t85';
+export const ROUTER_V3_VERSION = 'v3.2-projconf-tiers.model-thread.thread-gate-t0.7-opus-k4w14';
 
 export interface RouterV3Policy {
   model: string;
@@ -43,8 +45,12 @@ export interface RouterV3Policy {
   minConfidence: number;
   /** 自动送达：项目置信度 ≥ 此值 → 新建或续接（续接不满足直接条件时走 fork）；更低 → clarify（NTR_ROUTER_FORK_CONFIDENCE） */
   forkConfidence: number;
-  /** 续接要直接写进原会话，线程置信度还须 ≥ 此值；否则分叉 */
+  /** NEW（项目内新开或新目录）自动新建所需的项目置信度；不设时等于 forkConfidence（NTR_ROUTER_NEW_CONFIDENCE） */
+  newConfidence: number | null;
+  /** 自动送达还要求线程置信度 ≥ 此值，否则 clarify（NTR_ROUTER_THREAD_CONFIDENCE） */
   threadConfidence: number;
+  /** 续接要直接写进原会话，线程置信度还须 ≥ 此值；否则分叉 */
+  directThreadConfidence: number;
   /** 无内容短句沿用入口上一句去处的时间窗（分钟） */
   followupMinutes: number;
   timeoutMs: number;
@@ -57,7 +63,9 @@ export const DEFAULT_POLICY_V3: RouterV3Policy = {
   threadWindowDays: 14,
   minConfidence: 0.95,
   forkConfidence: 0.85,
-  threadConfidence: 0.85,
+  newConfidence: null,
+  threadConfidence: 0.7,
+  directThreadConfidence: 0.85,
   followupMinutes: 5,
   timeoutMs: 30000,
 };
@@ -262,6 +270,8 @@ export function createRouterV3(opts: RouterV3Options = {}): Router {
   };
   policy.minConfidence = threshold('NTR_ROUTER_MIN_CONFIDENCE') ?? policy.minConfidence;
   policy.forkConfidence = threshold('NTR_ROUTER_FORK_CONFIDENCE') ?? policy.forkConfidence;
+  policy.newConfidence = threshold('NTR_ROUTER_NEW_CONFIDENCE') ?? policy.newConfidence;
+  policy.threadConfidence = threshold('NTR_ROUTER_THREAD_CONFIDENCE') ?? policy.threadConfidence;
   if (policy.forkConfidence > policy.minConfidence) {
     throw new Error(`NTR_ROUTER_FORK_CONFIDENCE（${policy.forkConfidence}）不能高于 NTR_ROUTER_MIN_CONFIDENCE（${policy.minConfidence}）`);
   }
@@ -323,7 +333,9 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
 
   if (r.error || !parsed.ok) return hold(r.error ? '模型失败或超时' : '模型输出无效');
   const conf = parsed.projectConfidence;
-  if (conf === null || conf < policy.forkConfidence) return hold('对项目的把握不足');
+  const tc = parsed.threadConfidence;
+  if (conf === null || conf < (dest!.thread ? policy.forkConfidence : policy.newConfidence ?? policy.forkConfidence)) return hold('对项目的把握不足');
+  if (tc === null || tc < policy.threadConfidence) return hold(dest!.thread ? '对续哪条线程的把握不足' : '对是否该新开的把握不足');
   const why = parsed.reason ? `：${parsed.reason}` : '';
   if (!dest!.thread) {
     // 新建不碰任何已有会话：不分叉；open.ts 给自动新建的会话加"自动新建在项目 X"的路由说明
@@ -331,8 +343,7 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
     const where = cwd ? `在项目 ${base2(cwd)} 新开线程` : '不属于任何已有项目，新建目录';
     return { kind: 'new', provider: newProvider(cwd), cwd, confidence: conf, reason: `${where}${why}`, delivery: 'direct', ...common, auto: true, holdReason: null };
   }
-  const tc = parsed.threadConfidence;
-  const delivery = conf >= policy.minConfidence && tc !== null && tc >= policy.threadConfidence ? ('direct' as const) : ('fork' as const);
+  const delivery = conf >= policy.minConfidence && tc >= policy.directThreadConfidence ? ('direct' as const) : ('fork' as const);
   const t = dest!.thread;
   const how = delivery === 'fork' ? '分叉续接' : '续接';
   return { kind: 'continue', provider: t.provider, sessionId: t.sessionId, confidence: conf, reason: `属于项目 ${base2(t.cwd)}，${how}其中的线程${why}`, delivery, ...common, auto: true, holdReason: null };

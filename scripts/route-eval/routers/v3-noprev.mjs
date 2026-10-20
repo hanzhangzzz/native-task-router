@@ -10,6 +10,9 @@ import { claudeJsonComplete } from './claude-json.mjs';
 export const version = `${ROUTER_V3_VERSION}/noprev`;
 export const model = DEFAULT_POLICY_V3.model;
 export const notes = 'production createRouterV3 with ctx.previous=null (historical prev is not the entry previous); live=[] as in all offline evals; claude -p json backend for cost';
+// 留出集预注册（写进账本）：线程阈值候选 t=0 / 0.7 / 0.8 在 dev 上预先定，留出集只跑一次（生产默认 t=0.7），
+// 三张表由 lab/thread-gate.mjs 对这一次运行的逐条结果事后过滤得到。
+export const preregistered = 'thread-gate tables t=0/0.7/0.8 chosen on dev before heldout; single run at production default t=0.7; tables by post-filtering this run (lab/thread-gate.mjs)';
 export async function create() {
   const r = createRouterV3({ complete: claudeJsonComplete() });
   return { route: (text, ctx) => r.route(text, { ...ctx, previous: null }) };
