@@ -4,6 +4,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-providers-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
@@ -263,6 +264,33 @@ check('codex 扫描：标题取自 session_index；archived 只计数不入库',
 fs.writeFileSync(path.join(process.env.CODEX_HOME, 'session_index.jsonl'), JSON.stringify({ id: TID, thread_name: '改名后' }) + '\n');
 cr = await scanCodex();
 check('codex 扫描：改名无需重解析 rollout 即可生效', [cr.reparsed, cr.cards[0]?.title], [0, '改名后']);
+
+// codex-cli 0.163 起旧 rollout 被原地压成 .jsonl.zst，且 mtime 可能是压缩时刻；两者并存时以 .jsonl 为准
+const ZID = '01a00000-0000-7000-8000-0000000000b1';
+const BID = '01a00000-0000-7000-8000-0000000000b2';
+const zdir = path.join(process.env.CODEX_HOME, 'sessions', '2026', '09', '01');
+fs.mkdirSync(zdir, { recursive: true });
+const rollout = (id, prompt) => [meta({ id }), xu(t(1), prompt), xa(t(2), `${prompt}的回复`, 'final_answer')].join('\n') + '\n';
+const zfile = path.join(zdir, `rollout-2026-09-01T10-00-00-${ZID}.jsonl.zst`);
+fs.writeFileSync(zfile, zlib.zstdCompressSync(Buffer.from(rollout(ZID, '压缩后的旧会话'))));
+const compressedAt = new Date('2026-10-19T12:47:00.000Z');
+fs.utimesSync(zfile, compressedAt, compressedAt);
+fs.writeFileSync(path.join(zdir, `rollout-2026-09-01T11-00-00-${BID}.jsonl`), rollout(BID, '未压缩那份'));
+fs.writeFileSync(path.join(zdir, `rollout-2026-09-01T11-00-00-${BID}.jsonl.zst`), zlib.zstdCompressSync(Buffer.from(rollout(BID, '压缩包里的旧内容'))));
+cr = await scanCodex();
+const zc = cr.cards.find((c) => c.sessionId === ZID);
+check('codex 扫描：只有 .jsonl.zst 也能读出卡片', [zc?.firstPrompt, zc?.lastReply], ['压缩后的旧会话', '压缩后的旧会话的回复']);
+check('codex 扫描：.jsonl 与 .jsonl.zst 并存只出一张卡，取 .jsonl', cr.cards.filter((c) => c.sessionId === BID).map((c) => c.firstPrompt), ['未压缩那份']);
+check('codex 扫描：最近活跃取内容时间戳，不受压缩改写的 mtime 影响', [zc?.startedAt, zc?.updatedAt], [t(0), t(2)]);
+// 缓存命中：同路径同 size 同 mtime 时不再读文件。把 .zst 换成等长的坏字节并还原 mtime，若重新解压就会读不出卡片。
+const zsize = fs.statSync(zfile).size;
+fs.writeFileSync(zfile, Buffer.alloc(zsize, 0x61));
+fs.utimesSync(zfile, compressedAt, compressedAt);
+cr = await scanCodex();
+check('codex 扫描：.zst 指纹未变 → 走缓存不重新解压（换成坏字节仍出原卡片，reparsed=0）', [cr.reparsed, cr.cards.find((c) => c.sessionId === ZID)?.firstPrompt], [0, '压缩后的旧会话']);
+fs.utimesSync(zfile, new Date(), new Date());
+cr = await scanCodex();
+check('codex 扫描：.zst 指纹变化且解压失败 → 不出卡片、不报错', [cr.reparsed, cr.cards.some((c) => c.sessionId === ZID)], [1, false]);
 
 fs.rmSync(root, { recursive: true, force: true });
 console.log(`\n${pass} PASS / ${fail} FAIL`);
