@@ -61,7 +61,10 @@ export async function evaluate({ router, samples, sessions, buildCard = defaultB
       }
       const scored = scoreDecision(s, decision, cards);
       const top = top1Of(s, decision);
-      const row = { sample: s, decision, scored, latencyMs: decision.latencyMs ?? null, costUsd: decision.costUsd ?? null, conf: top.conf, top1Correct: top.correct, poolCards: cards.length };
+      // 项目层打分用：决策落在哪个目录（新建到新目录为 null）、真值项目（续接 = 目标会话的目录；新建 = 样本目录）
+      const chosenCwd = decision.kind === 'continue' ? (cards.find((c) => c.provider === decision.provider && c.sessionId === decision.sessionId)?.cwd ?? null) : decision.kind === 'new' ? (decision.cwd ?? null) : undefined;
+      const targetCwd = s.label === 'NEW' ? s.cwd : (cards.find((c) => c.provider === s.label.provider && c.sessionId === s.label.sessionId)?.cwd ?? null);
+      const row = { sample: s, decision, scored, latencyMs: decision.latencyMs ?? null, costUsd: decision.costUsd ?? null, conf: top.conf, top1Correct: top.correct, poolCards: cards.length, chosenCwd, targetCwd, targetProjectInPool: cards.some((c) => c.cwd === targetCwd) };
       rows[i] = row;
       onRow(row, i);
     }
@@ -81,7 +84,10 @@ export function rowForDisk(r) {
       kind: d.kind, chosen: d.kind === 'continue' ? `${d.provider}:${d.sessionId}` : null, confidence: d.confidence ?? null,
       options: d.options?.map((o) => ({ id: `${o.provider}:${o.sessionId}`, p: o.probability })) ?? null,
       reason: d.reason ?? null, error: d.error ?? null, model: d.model ?? null,
+      delivery: d.delivery ?? null, via: d.via ?? null, thread: d.thread ?? null, modelReason: d.modelReason ?? null, modelConfidence: d.modelConfidence ?? null,
+      ranked: d.ranked?.map((o) => (o.kind === 'new' ? { new: true, cwd: o.cwd ?? null, p: o.probability } : { id: `${o.provider}:${o.sessionId}`, p: o.probability })) ?? null,
     },
+    chosenCwd: r.chosenCwd, targetCwd: r.targetCwd, targetProjectInPool: r.targetProjectInPool,
     candidates: d.candidates ?? null,
     outcome: r.scored.outcome, a1Type: r.scored.a1Type, top1: r.scored.top1, top3: r.scored.top3, diag: r.scored.diag,
     conf: r.conf, top1Correct: r.top1Correct, latencyMs: r.latencyMs, costUsd: r.costUsd, poolCards: r.poolCards,
