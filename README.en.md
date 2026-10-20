@@ -35,7 +35,7 @@ npm run ntr -- route "add a per-user quota to the rate limiter"
 | Finding the session | Remember the directory and the tool, `cd` there, scroll the resume list | Say one sentence; it searches across projects and across Claude Code / Codex |
 | Context | A new session, or memory and summaries, all of them compressed | Native resume, the full session log |
 | Interface | Learn yet another desktop app | Your iTerm / Terminal and the native TUI; approvals and tools work as before |
-| Wrong destination | Can't happen, you did it yourself | When unsure, it asks you to pick. In a 240-sample held-out eval, no auto-sent message went to the wrong session |
+| Wrong destination | Can't happen, you did it yourself | When unsure, it asks you to pick; medium-confidence continuations go into a fork, leaving the original untouched |
 
 **It doesn't compete with Claude Code or Codex.** It runs no agent, hosts no terminal, and never approves anything for you. It only decides where a sentence should go. The better they get, the more useful it gets, and the routing model itself is swappable.
 
@@ -98,22 +98,23 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 ## How it works
 
 ```
-sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a project ─▶ gate ─▶ pick a session in it ─┬─▶ type into the open terminal tab
-                                                                                                        ├─▶ new tab: claude -r / codex resume
-                                                                                                        ├─▶ new tab: new session in that project dir
-                                                                                                        └─▶ middle tier: new tab, forked session; original untouched
+sentence ─▶ local session index ─▶ group by project, list recent threads ─▶ Opus picks project + thread (or new) ─▶ gate ─┬─▶ type into the open terminal tab
+                                                                                                                    ├─▶ new tab: claude -r / codex resume
+                                                                                                                    ├─▶ new tab: new session in that project dir
+                                                                                                                    └─▶ middle-tier continuation: new tab, forked; original untouched
 ```
 
 - **Index**: reads native history directly (`~/.claude/projects`, `~/.codex/sessions`) and keeps only interactive sessions, excluding `claude -p`, `codex exec`, subagents, and temp-dir probes. The cache is incremental, so a warm refresh takes tens of milliseconds.
-- **Project first, then session**: sessions are grouped by project directory (the 40 most recently active projects). Each project becomes a small card (directory name, last activity, what its recent sessions were about, a snippet of the last reply). The cards, your previous sentence, and the sessions you are looking at or have open go to the model, which only answers "which project does this sentence belong to" (or none of them), with a confidence and its top three. What you want is to land in the right project, where CLAUDE.md, memory, and the whole history live; which session to continue is decided by deterministic rules.
-- **Picking a session inside the project**: if exactly one session of that project is open in a terminal, it types into that one. Otherwise, if the project's latest session was active within 24 hours, it resumes it natively. If it's older, it starts a new session in that project directory (Claude Code / Codex load memory and CLAUDE.md themselves). Only when several sessions are open and it can't tell them apart does it ask you.
-- **A three-tier gate** (by project confidence):
-  - **≥ 0.95, direct**: types into the open tab, or resumes the session natively.
-  - **0.85–0.95, forked**: still sent automatically, but the original session is never touched. It forks that session into a new one (`claude -r <id> --fork-session` / `codex fork <id>`) that carries all of its context and receives the sentence in a new tab. The original session's history file doesn't change by a single byte, even if it is open in a terminal right now. One routing note goes in front of the text: the message was delivered automatically, with this confidence, and if it is unrelated to the project or session, the agent should say so and stop without changing any files. When this tier starts a new session instead, the note is added too.
-  - **< 0.85, you confirm**: it lists the top three destinations with the first one preselected, so Enter sends it.
-  - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← history, the candidate list) is always delivered directly, without a note.
-  - Why a middle tier: a wrong send writes the sentence and the agent's reply into the wrong session's native history, and that can't be undone. "Type it but don't press Enter until you confirm" would mean watching the terminal. Forking lets this band go out automatically without dirtying any existing session.
-- **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it continues the session you were looking at when you opened the entry; failing both, it lists the open sessions. This path takes tens of milliseconds.
+- **Project and thread in one decision**: sessions are grouped by project directory (the 40 most recently active projects). Each project lists up to 4 threads active in the last 14 days (or its latest one if none), each with its tool, last activity, status (focused / open / running / closed), and a one-line topic (first and latest message). Together with your previous sentence, this goes to the model, which answers which project the sentence belongs to and whether it continues one of its threads or starts a new one there (or belongs to no existing project), with one confidence for the project and one for the thread, a short reason, and its top three. One project often has several tasks in parallel, so the focused tab, the latest thread, and open tabs are only weak hints; the thread is chosen by how well the sentence matches each thread's topic.
+- **Which tool a new thread uses**: the tool of that project's latest session, unless the sentence explicitly names one ("use codex …", "let Claude …"). Claude Code / Codex load memory and CLAUDE.md themselves.
+- **The gate**: it sends automatically only with at least 0.85 confidence in the project and at least 0.7 in the thread (which one to continue, or that it should be new); if either falls short, you confirm.
+  - **Project ≥ 0.95 and thread ≥ 0.85, direct**: types into the open tab, or resumes the session natively.
+  - **Other automatic continuations, forked**: still sent automatically, but the original session is never touched. It forks that session into a new one (`claude -r <id> --fork-session` / `codex fork <id>`) that carries all of its context and receives the sentence in a new tab. The original session's history file doesn't change by a single byte, even if it is open in a terminal right now. One routing note goes in front of the text: the message was delivered automatically, with this confidence, and if it is unrelated to the project or session, the agent should say so and stop without changing any files.
+  - **A new thread, started automatically only when most confident**: only with project ≥ 0.95 does it start a new session in that project directory (or a new directory if it belongs to no project), with no fork; the new session also starts with a note: this message was started automatically in project X, and if it doesn't belong there, the agent should say so and stop. Below 0.95 you confirm, with "new session in project X" preselected, so Enter does it. A new session has neither an original session to protect by forking nor an existing thread to anchor it, so it gets the same bar as direct delivery.
+  - **Not confident enough, you confirm**: it lists the model's top projects, each with its best thread there or a new one, with the first preselected, so Enter sends it.
+  - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← history, the candidate list, new) is always delivered directly, without a note.
+  - Why a forked tier: a wrong send writes the sentence and the agent's reply into the wrong session's native history, and that can't be undone. "Type it but don't press Enter until you confirm" would mean watching the terminal. Forking lets this band go out automatically without dirtying any existing session. A wrong thread in the forked tier doesn't dirty the original session; the cost is that the new session lacks the context you meant to continue.
+- **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it asks you, with the session you were looking at first and the other open sessions after it by recency. This path takes tens of milliseconds.
 - **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, that the session is idle, and that the screen shows no approval prompt and no half-typed draft of yours. If any check fails, it only switches to the tab and copies your sentence to the clipboard. It never starts a second process on a session that is already running.
 - **Which terminal a new session opens in**: the one you were looking at when you opened the input box; otherwise the one that is running (iTerm if both are); if neither is running, iTerm, or Terminal when iTerm isn't installed. Set `NTR_TERMINAL=iterm` or `NTR_TERMINAL=terminal` to pin it.
 - **Terminal opens a new window**: Terminal's scripting interface can only open windows; a tab would need simulated keystrokes that steal focus, so it doesn't. If Terminal isn't running, it is started without an extra blank window and brought to the front once the window is ready, the same as a cold-started iTerm. If Terminal is already running, it doesn't steal focus.
@@ -121,24 +122,22 @@ sentence ─▶ local session index ─▶ group by project ─▶ Opus picks a 
 
 ## How accurate is it?
 
-The short version: **the most confident sends go straight in and never hit the wrong project on the held-out set; the middle band is sent automatically into a fork, so a wrong send no longer dirties the original session; when unsure it asks you to press Enter once.**
+The short version: **five in six automatic sends get both project and thread right, and the tier that writes straight into an original session never hit the wrong project; about a quarter of sentences go out automatically, and the rest ask you to press Enter once.**
 
-Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Sending to the wrong project is a hard error; landing in the right project but a different session than the one you had in mind is a soft one (a continuation within the same project, which a human might also pick).
+Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Held-out set, 253 samples. An automatic send counts as fully right only if both project and thread are right: a continuation must land in the session you actually returned to, and a new task must be routed to a new thread. 31% of the samples are contentless follow-ups like "continue" or "ok"; offline there is no entry context, so they all go to confirmation.
 
-Held-out set, 253 samples, run once. 31% are contentless follow-ups like "continue" or "ok"; offline there is no "which session were you looking at" signal, so they all go to confirmation. By tier:
+**The numbers below are a post-hoc filter of a single held-out run, not an independent validation.** The held-out set was run once (when the bar for new sessions was still 0.85). The rule "start a new session automatically only at 0.95 or above" was adopted after seeing those results, and the table applies it to the same results. The thread-threshold candidates (0 and 0.7) were fixed on the development set beforehand.
 
-| Tier | Samples (share of all) | Wrong project | Right project, different session |
-| --- | --- | --- | --- |
-| ≥ 0.95 direct | 20 (8%) | 0 | 3 |
-| 0.85–0.95 forked | 71 (28%) | 4 | 10 |
-| < 0.85 confirm | 162 (64%) | — | — |
+| | Automatic (of 253) | Fully right | Right project, wrong thread | Wrong project | Written into the original session (wrong project) | Forked fully right | New sessions fully right |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Default (thread threshold 0.7) | 60 (24%) | 50 | 7 | 3 | 14 (0) | 35 / 42 | 3 / 4 |
+| Thread threshold 0 | 74 (29%) | 59 | 12 | 3 | 14 (0) | 43 / 55 | 4 / 5 |
+| 0.5.0 (model picks the project, rules pick the session) | 91 (36%) | 68 | 17 | 6 | — | — | — |
 
-- Together that is 36% automatic, the same as a single 0.85 threshold. The difference is that all 4 wrong-project sends fall in the forked tier, and all 4 were continuations, not new sessions. They now land in a forked session, and the original is left unchanged. The routing note at the top of that session is the last gate. In a small test, Claude and Codex each got one sentence clearly unrelated to the project; both said so and stopped without changing files. That is one try each, and the 4 wrong samples were not replayed, so it is not proven that the agent always stops.
-- When it asks, the preselected first option is right 70% of the time (continuation samples that went through the model).
-- You can pick the thresholds: `NTR_ROUTER_MIN_CONFIDENCE` is the direct line (default 0.95) and `NTR_ROUTER_FORK_CONFIDENCE` the forked line (default 0.85). Setting both to 0.95 turns the forked tier off.
-- Once the project is right, "the project's latest session" is the correct destination 90% of the time (193 continuation samples in the held-out set).
-- The fast path for short follow-ups (previous destination / the session you were looking at) depends on live entry signals that the historical data lacks, so its accuracy is not yet measured; only the rules are.
-- Each decision takes about 4 seconds (p95 7 s), mostly `claude -p` startup and Opus inference; the fast path takes tens of milliseconds.
+- Compared with 0.5.0, fewer sentences go out automatically, and the ones that do are more accurate: fully right rises from three in four to five in six, wrong-project sends drop from 6 to 3, and "new session in the wrong project" drops from 6 to 1 (same held-out set, same counting). 0.5.0 was originally reported as 70 / 17 / 4 because that count did not check which project a new session landed in; 2 of them landed in the wrong one. Here it is recounted with "both project and thread right".
+- For more automatic sends, set `NTR_ROUTER_THREAD_CONFIDENCE` to 0: about 29% automatic, at the cost of more wrong threads (all in the forked tier, so the original session is untouched; the new session just lacks the context you meant to continue).
+- The 3 remaining wrong-project sends: 2 in the forked tier, original sessions untouched; 1 new session for a sentence that belonged to a directory you had just created, placed into an existing project instead.
+- Each decision takes about 5 seconds at p50 and 8 seconds at p90, mostly `claude -p` startup and Opus inference; at API prices that is about $0.09 per decision (no extra charge on a subscription). The fast path takes tens of milliseconds.
 
 The sample is small and reflects one person's habits. These numbers describe this data, not a general error rate.
 
@@ -150,19 +149,21 @@ Routing only decides where a sentence goes. It is separate from the Claude Code 
 | --- | --- |
 | (default) | Opus via local `claude -p`, using your Claude subscription, with no API key |
 | `NTR_ROUTER_MODEL=sonnet` | Any other model `claude -p` supports |
-| `NTR_ROUTER_MIN_CONFIDENCE=0.97` | Confidence threshold for direct delivery (default 0.95); higher means fewer sends straight into the original session |
-| `NTR_ROUTER_FORK_CONFIDENCE=0.9` | Confidence threshold for forked delivery (default 0.85); below it you confirm. It can't be higher than the direct threshold; a bad value is an error |
+| `NTR_ROUTER_MIN_CONFIDENCE=0.97` | Project confidence needed to write straight into the original session (default 0.95); higher means fewer direct sends |
+| `NTR_ROUTER_FORK_CONFIDENCE=0.9` | Project confidence needed for any automatic delivery (default 0.85); below it you confirm. It can't be higher than the direct threshold; a bad value is an error |
+| `NTR_ROUTER_THREAD_CONFIDENCE=0` | Thread confidence needed for automatic delivery (default 0.7); higher means fewer automatic sends with more accurate threads, 0 ignores the thread, see the table above |
+| `NTR_ROUTER_NEW_CONFIDENCE=0.97` | Project confidence needed to start a new session automatically (defaults to `NTR_ROUTER_MIN_CONFIDENCE`); it can't be lower than the forked threshold, and a bad value is an error |
 | `NTR_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | The same candidates, prompt, and gate via [OpenRouter](https://openrouter.ai); combine with e.g. `NTR_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` to pick any model |
 | `NTR_ROUTER=interim` | Use Jev (`typesafe/jev-1.13`) on OpenRouter Decisions to choose |
 
-You can also implement the [`Router`](src/layers/types.ts) interface yourself. One caveat: the accuracy above was measured with the default Opus. In the same eval, DeepSeek V4.1 Flash, GPT-5.6 Luna, Qwen3.8 Flash, and Haiku 5.5 picked the right first choice only 54–66% of the time, versus about 73% for Opus. Try `npm run ntr -- route` on your own sessions before switching.
+You can also implement the [`Router`](src/layers/types.ts) interface yourself. One caveat: the gate thresholds were calibrated for the default Opus, and other models report confidence differently. Try `npm run ntr -- route` on your own sessions before switching.
 
 ## Known limitations
 
 - macOS with iTerm2 or Terminal only. Sessions open in other terminals such as Ghostty or Warp can't be typed into; you get a notice and the sentence is copied to your clipboard.
 - Claude Code keeps 30 days of history by default, so older sessions can't be resumed.
 - A Codex session started with `--remote` can't be detected as running.
-- Routing needs a logged-in `claude`, and it is slow (see above).
+- Routing needs a logged-in `claude`, and it is slow: each decision waits for `claude -p` to start and Opus to answer; the short-follow-up fast path skips the model.
 - The input box is in English or Chinese; the command-line tool's messages and logs are still in Chinese.
 
 ## Data and privacy

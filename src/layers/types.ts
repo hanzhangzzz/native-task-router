@@ -135,5 +135,7 @@ export type OpenOutcome =
       reason?: string;
       /** Router 认为最可能是"新建"时的建议去处；入口据此把"新建"作为预选项（回车即新建） */
       suggestNew?: { provider: ProviderId; cwd: string | null } | null;
+      /** Router 按相关度排好的全部候选（含各项目内的"新建"及其目录）；入口按此顺序列出，缺省时退回 options + suggestNew */
+      ranked?: Array<{ kind: 'session'; provider: ProviderId; sessionId: string } | { kind: 'new'; provider: ProviderId; cwd: string | null }>;
     }
   | { action: 'failed'; why: string };

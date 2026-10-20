@@ -6,14 +6,14 @@
 //      任一不满足绝不 write；已存活的会话绝不再起第二个 resume 进程。
 //   A3 任何没送达的路径（focused-only / failed）都把正文放进剪贴板；clarify 把候选原样返回，正文仍在调用方手里。
 //   F  delivery === 'fork' 的续接：绝不写进开着的视图、绝不在原 id 上 resume；一律新开视图执行 forkArgv，
-//      原会话正在某个进程里跑也照样分叉（分叉是新 id，不违反"同一会话不二开"）。分叉档（续接与新建）
-//      的正文前加路由说明（routing-note.ts）；人工 pick / forceNew 与 direct 档不加。
+//      原会话正在某个进程里跑也照样分叉（分叉是新 id，不违反"同一会话不二开"）。分叉档续接的正文前加路由说明；
+//      路由自动新建（带置信度的 new，不论档位）加"自动新建在项目 X"的说明（routing-note.ts）；人工 pick / forceNew 与 direct 档续接不加。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ntrHome } from './providers/common.ts';
-import { routingNote } from './routing-note.ts';
+import { routingNote, routingNoteNew } from './routing-note.ts';
 import type {
   LiveSession,
   OpenOutcome,
@@ -262,9 +262,17 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
 
     if (decision.kind === 'clarify') {
       // Router v2 附带按相关度排好的 ranked（可含"新建"）；第一项是新建时把它作为预选
-      const first = (decision as { ranked?: Array<{ kind: string; provider?: ProviderId; cwd?: string | null }> }).ranked?.[0];
+      const rankedIn = (decision as { ranked?: Array<{ kind: string; provider?: ProviderId; sessionId?: string; cwd?: string | null }> }).ranked;
+      const first = rankedIn?.[0];
       const suggestNew = first?.kind === 'new' && first.provider ? { provider: first.provider, cwd: first.cwd ?? null } : null;
-      return finish({ action: 'clarify', options: decision.options, reason: decision.reason, suggestNew });
+      // 全部候选按 Router 的顺序透传：排第二及以后的"项目内新建"也带着目录，不退化成新目录
+      type Ranked = NonNullable<Extract<OpenOutcome, { action: 'clarify' }>['ranked']>;
+      const ranked: Ranked = [];
+      for (const o of rankedIn ?? []) {
+        if (o.kind === 'new' && o.provider) ranked.push({ kind: 'new', provider: o.provider, cwd: o.cwd ?? null });
+        else if (o.kind === 'session' && o.provider && o.sessionId) ranked.push({ kind: 'session', provider: o.provider, sessionId: o.sessionId });
+      }
+      return finish({ action: 'clarify', options: decision.options, reason: decision.reason, suggestNew, ...(ranked.length ? { ranked } : {}) });
     }
 
     // ---- new ----
@@ -274,7 +282,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       // 不预先检查目录是否存在：项目常在 ~/Desktop、~/Documents 下，stat 会触发 macOS 文件夹授权弹框，被拒时还会误判为不存在。
       // 命令是 `cd <目录> && …`，目录不在时 claude 不会启动，iTerm 里能看到报错，正文也在那条命令里。
       const cwd = decision.cwd ?? newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'ntr-tasks'), text);
-      const body = decision.delivery === 'fork' && decision.confidence !== null ? routingNote(text, decision.confidence) : text;
+      // 路由自动新建（有置信度）一律带说明，让新会话自查是否开错了目录；人工 --new（置信度 null）不加
+      const body = decision.confidence !== null ? routingNoteNew(text, decision.confidence, path.basename(cwd)) : text;
       const view = await opts.surface.openView(cwd, provider.newArgv(body), { windowId: opts.windowId });
       const sessionId = await settle(provider, view, opts.settleMs ?? 2500);
       return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd });

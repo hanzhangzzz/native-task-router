@@ -9,7 +9,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
 const { open, approvalPrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
-const { routingNote, stripRoutingNote } = await import('../src/layers/routing-note.ts');
+const { routingNote, routingNoteNew, stripRoutingNote } = await import('../src/layers/routing-note.ts');
 
 let pass = 0;
 let fail = 0;
@@ -246,6 +246,10 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('clarify 透传原因；Router 首选新建时给出 suggestNew（入口预选新建）', rs.action === 'clarify' && rs.reason === '置信度低于阈值' && rs.suggestNew?.provider === 'codex' && rs.suggestNew?.cwd === root);
   const rt = await open(TEXT, { ...w.opts, router: route({ kind: 'clarify', options: opts, reason: 'x', ranked: [{ kind: 'session', ...opts[0] }] }) });
   check('Router 首选是会话时 suggestNew 为 null（入口预选第 1 个会话）', rt.action === 'clarify' && rt.suggestNew === null);
+  const proj2 = path.join(root, 'proj-x');
+  const ru = await open(TEXT, { ...w.opts, router: route({ kind: 'clarify', options: opts, reason: 'x', ranked: [{ kind: 'session', ...opts[0] }, { kind: 'new', provider: 'codex', cwd: proj2, probability: null }, { kind: 'session', ...opts[1] }] }) });
+  check('clarify 按 Router 顺序透传全部候选：排第二的项目内新建保留目录', ru.action === 'clarify' && JSON.stringify(ru.ranked) === JSON.stringify([{ kind: 'session', provider: 'claude', sessionId: 'A' }, { kind: 'new', provider: 'codex', cwd: proj2 }, { kind: 'session', provider: 'codex', sessionId: 'B' }]) && ru.suggestNew === null, JSON.stringify(ru.ranked));
+  check('Router 没给 ranked 时 clarify 不带 ranked（入口退回 options + suggestNew）', r.ranked === undefined);
   const w2 = world({ cards: [card('claude', 'A', root)], liveSeq: [[live('claude', 'A', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
   const r2 = await open(TEXT, { ...w2.opts, router: { route: async () => { throw new Error('不应路由'); } }, pick: { provider: 'claude', sessionId: 'A' } });
   check('S6 pick 跳过路由并送达所选', r2.action === 'wrote' && w2.calls.write[0].v === 'V1');
@@ -388,14 +392,39 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('fork 之后下一句的"上一句"去处是分叉出的新会话，不是原会话', seen.previous?.sessionId === 'FORK1', JSON.stringify(seen.previous));
   check('fork 出的新会话进入 ← 历史', readHistory(st.opts.logPath).some((h) => h.sessionId === 'FORK1'));
 
-  // 分叉档的 new：照旧在项目目录新建，正文前加说明头；direct 档的 new 不加
+  // 路由自动新建（有置信度，不论档位）：在项目目录新建，正文前加"自动新建在项目 X"的说明头；人工 --new（置信度 null）不加
   const n1 = world({});
   const proj = fs.mkdtempSync(path.join(root, 'proj-'));
-  await open(TEXT, { ...n1.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.86, reason: 'x', delivery: 'fork' }) });
-  check('fork 档 new：在项目目录 newArgv(说明头+正文)', n1.calls.openView[0].cwd === proj && sameArgv(n1.calls.openView[0].argv, ['claude', note(TEXT, 0.86)]));
+  await open(TEXT, { ...n1.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.86, reason: 'x', delivery: 'direct' }) });
+  const nn = routingNoteNew(TEXT, 0.86, path.basename(proj));
+  check('自动新建：在项目目录 newArgv(新建说明头+正文)', n1.calls.openView[0].cwd === proj && sameArgv(n1.calls.openView[0].argv, ['claude', nn]));
+  check('新建说明头：点明项目目录名与置信度，不含本机路径', nn.startsWith(`[路由说明] 这句话由 Native Task Router 自动新建在项目 ${path.basename(proj)}，置信度 0.86。如果这句话不属于这个项目，请说明原因并停下`) && !nn.includes(root), nn.split('\n')[0]);
+  check('新建说明头：英文', routingNoteNew('add a CSV import', 0.9, 'shop-api').startsWith('[Routing note] Native Task Router automatically started this session in project shop-api (confidence 0.90).'));
+  check('新建说明头可被 stripRoutingNote 去掉（中英文）', stripRoutingNote(nn) === TEXT && stripRoutingNote(routingNoteNew('add a CSV import', 0.9, 'x')) === 'add a CSV import');
   const n2 = world({});
   await open(TEXT, { ...n2.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.97, reason: 'x', delivery: 'direct' }) });
-  check('direct 档 new：正文不加说明头', sameArgv(n2.calls.openView[0].argv, ['claude', TEXT]));
+  check('direct 档自动新建同样加新建说明头', sameArgv(n2.calls.openView[0].argv, ['claude', routingNoteNew(TEXT, 0.97, path.basename(proj))]));
+  const n3 = world({});
+  await open(TEXT, { ...n3.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: null, reason: 'x' }) });
+  check('置信度为 null 的新建（人工语义）不加说明头', sameArgv(n3.calls.openView[0].argv, ['claude', TEXT]));
+
+  // 端到端：生产 Router v3 + open()。模型判 NEW、项目 0.96、线程 0.75 → 在项目目录自动新建，正文带新建说明；项目 0.90 → 确认、预选项目内新建
+  {
+    const { createRouterV3 } = await import('../src/layers/router/v3.ts');
+    const projE = fs.mkdtempSync(path.join(root, 'proj-e2e-'));
+    const now = Date.parse('2026-10-10T01:00:00Z');
+    const fake = (pc) => async (req) => {
+      const u = req.messages[1].content; const at = u.indexOf(`/${path.basename(projE)} ·`); const p = u.slice(u.lastIndexOf('[P', at) + 1, u.indexOf(']', u.lastIndexOf('[P', at)));
+      return { text: JSON.stringify({ project: p, projectConfidence: pc, thread: 'NEW', threadConfidence: 0.75, reason: 'x', top3: [`${p}/NEW`] }), costUsd: null };
+    };
+    const longText = '给这个项目加一个把报表导出成 CSV 文件的命令行入口';
+    const e1 = world({ cards: [card('claude', 'E1', projE, { updatedAt: '2026-10-10T00:30:00Z' })] });
+    const o1 = await open(longText, { ...e1.opts, router: createRouterV3({ complete: fake(0.96), env: {}, now: () => now }) });
+    check('端到端：NEW 0.96 + 线程 0.75 → 在项目目录自动新建，正文带新建说明', o1.action === 'opened' && e1.calls.openView[0]?.cwd === projE && sameArgv(e1.calls.openView[0].argv, ['claude', routingNoteNew(longText, 0.96, path.basename(projE))]), JSON.stringify(o1));
+    const e2 = world({ cards: [card('claude', 'E1', projE, { updatedAt: '2026-10-10T00:30:00Z' })] });
+    const o2 = await open(longText, { ...e2.opts, router: createRouterV3({ complete: fake(0.9), env: {}, now: () => now }) });
+    check('端到端：NEW 0.90 → 确认，预选在该项目新建（suggestNew 带目录），无副作用', o2.action === 'clarify' && o2.suggestNew?.cwd === projE && o2.ranked?.[0]?.kind === 'new' && e2.calls.openView.length === 0, JSON.stringify(o2));
+  }
 
   // direct 档与人工 pick：原样写入，不加说明头
   const d = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });

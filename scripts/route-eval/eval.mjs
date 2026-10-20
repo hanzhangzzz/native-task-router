@@ -38,7 +38,7 @@ if (SET === 'heldout') {
   if (frozen !== actual) { console.error(`拒绝：heldout.jsonl 哈希 ${actual} 与冻结值 ${frozen} 不一致`); process.exit(2); }
   const prior = fs.existsSync(ledgerPath) ? readJsonl(ledgerPath).filter((r) => r.version === version) : [];
   if (prior.length) { console.error(`拒绝：策略版本 ${version} 已在 ${prior[0].time} 跑过留出集（账本 ${ledgerPath}）。换新版本号再跑。`); process.exit(3); }
-  appendJsonl(ledgerPath, { version, time: ts, status: 'started', heldoutSha256: actual, n: samples.length });
+  appendJsonl(ledgerPath, { version, time: ts, status: 'started', heldoutSha256: actual, n: samples.length, notes: mod.notes ?? null, preregistered: mod.preregistered ?? null });
 } else if (limit) samples = samples.slice(0, limit);
 
 const logical = JSON.parse(fs.readFileSync(path.join(DATA, 'sessions.json'), 'utf8'));

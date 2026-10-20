@@ -16,16 +16,34 @@ import path from 'node:path';
 import { cardFromClaudeLines, claudeLineWanted } from '../../src/layers/providers/claude.ts';
 import { cardFromCodexLines, codexLineWanted } from '../../src/layers/providers/codex.ts';
 import { readRelevantLines } from '../../src/layers/providers/common.ts';
+import zlib from 'node:zlib';
+import { DEFAULT_OUT } from './lib.mjs';
 
 export const CUT_MARGIN_MS = 2000;
 const TS_RE = /"timestamp":"([^"]+)"/;
+
+// codex-cli 0.163 起会把较旧的 rollout 原地压缩成 <文件>.jsonl.zst（2026-10-19 本机实测：143 个评测会话里 136 个被压缩）。
+// 评测集引用的是挖掘时的 .jsonl 路径；原文件不在而 .zst 在时，解压一份到评测数据目录的缓存里读（只读原生文件，不改动它）。
+const ZST_CACHE = path.join(process.env.ROUTE_EVAL_DATA ?? path.join(DEFAULT_OUT, 'v2'), 'zst-cache');
+export function resolveNative(file) {
+  if (fs.existsSync(file)) return file;
+  const zst = `${file}.zst`;
+  if (!fs.existsSync(zst)) return null;
+  const out = path.join(ZST_CACHE, path.basename(file));
+  if (!fs.existsSync(out)) {
+    fs.mkdirSync(ZST_CACHE, { recursive: true });
+    fs.writeFileSync(`${out}.tmp`, zlib.zstdDecompressSync(fs.readFileSync(zst)));
+    fs.renameSync(`${out}.tmp`, out);
+  }
+  return out;
+}
 
 /** file → { lines, stamps: [{i, t}] }，按需加载并缓存（只含生产实现会读的行）。 */
 const loaded = new Map();
 async function load(provider, file) {
   if (!loaded.has(file)) {
     loaded.set(file, (async () => {
-      const lines = await readRelevantLines(file, provider === 'claude' ? claudeLineWanted : codexLineWanted);
+      const lines = await readRelevantLines(resolveNative(file), provider === 'claude' ? claudeLineWanted : codexLineWanted);
       const stamps = [];
       lines.forEach((l, i) => {
         const m = l.match(TS_RE);
@@ -65,7 +83,7 @@ export async function buildProdCard(provider, file, asOfIso, opts = {}) {
   const t = Date.parse(asOfIso);
   const limit = t - CUT_MARGIN_MS;
   // 原生历史会被清理（Claude 默认只留 30 天）：评测集引用的文件不在了，就当这个会话当时不在库里
-  if (!fs.existsSync(file)) { stats.missing = (stats.missing ?? 0) + 1; return null; }
+  if (!resolveNative(file)) { stats.missing = (stats.missing ?? 0) + 1; return null; }
   const { lines, stamps } = await load(provider, file);
   // 截断位置：第一条时间戳 > limit 的行；之前的行一起交给生产实现
   let cutIdx = lines.length;
