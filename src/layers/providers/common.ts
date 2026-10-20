@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import type { LiveState, ProviderId, SessionCard } from '../types.ts';
 import { stripRoutingNote } from '../routing-note.ts';
 
@@ -157,6 +158,7 @@ const MAX_LINE_BYTES = 64 * 1024 * 1024;
 /**
  * 流式读取 jsonl，只返回 accept(行首 512 字节) 为真的行。
  * 工具结果、大块 base64 等无关的巨行靠行首就被丢弃，不拼接、不解码，所以数百 MB 的历史也能快速扫过。
+ * `.zst`（codex-cli 0.163 起把旧 rollout 原地压成 .jsonl.zst）边读边解压，只读、不落盘解压副本。
  */
 export async function readRelevantLines(file: string, accept: (head: string) => boolean): Promise<string[]> {
   const out: string[] = [];
@@ -176,7 +178,9 @@ export async function readRelevantLines(file: string, accept: (head: string) => 
     }
     reset();
   };
-  const stream = fs.createReadStream(file, { highWaterMark: 1 << 20 });
+  const raw = fs.createReadStream(file, { highWaterMark: 1 << 20 });
+  const stream = file.endsWith('.zst') ? raw.pipe(zlib.createZstdDecompress()) : raw;
+  if (stream !== raw) raw.on('error', (e) => stream.destroy(e));
   try {
     for await (const chunk of stream as AsyncIterable<Buffer>) {
       let pos = 0;
@@ -207,11 +211,13 @@ export async function readRelevantLines(file: string, accept: (head: string) => 
     endOfLine(); // 无换行的末行可能是半行，解析层会跳过
   } finally {
     stream.destroy();
+    raw.destroy();
   }
   return out;
 }
 
-export async function listJsonl(root: string, recursive: boolean): Promise<string[]> {
+/** 列出 .jsonl；zst 为真时也收 .jsonl.zst（读取见 readRelevantLines）。 */
+export async function listJsonl(root: string, recursive: boolean, zst = false): Promise<string[]> {
   const out: string[] = [];
   let entries: fs.Dirent[];
   try {
@@ -222,8 +228,8 @@ export async function listJsonl(root: string, recursive: boolean): Promise<strin
   }
   for (const e of entries) {
     const full = path.join(root, e.name);
-    if (e.isFile() && e.name.endsWith('.jsonl')) out.push(full);
-    else if (e.isDirectory() && recursive) out.push(...(await listJsonl(full, true)));
+    if (e.isFile() && (e.name.endsWith('.jsonl') || (zst && e.name.endsWith('.jsonl.zst')))) out.push(full);
+    else if (e.isDirectory() && recursive) out.push(...(await listJsonl(full, true, zst)));
   }
   return out;
 }

@@ -1,4 +1,6 @@
 // Codex Provider。事实源：~/.codex/sessions/YYYY/MM/DD/rollout-*-<threadId>.jsonl 与 ~/.codex/session_index.jsonl。
+// codex-cli 0.163 起把较旧的 rollout 原地压成 rollout-*-<threadId>.jsonl.zst（保留原 mtime），同样索引。
+// "最近活跃"取内容里的时间戳（CardBuilder.touch），不看文件 mtime，压缩与否不影响排序。
 //
 // 存活映射（2026-10-13 在后台 PTY 里用真实 codex 0.162.1 实测）：
 //   1. 独立运行的 TUI：原生二进制（node 包装器 `node …/bin/codex` 的子进程）持有当前线程的
@@ -135,8 +137,8 @@ async function threadTitles(): Promise<Map<string, string>> {
  * 所以只计数、不入库。includeArchived 仅用于评估索引覆盖与耗时。
  */
 export async function scanCodex(opts: { includeArchived?: boolean } = {}): Promise<ScanResult> {
-  const files = await listJsonl(path.join(codexHome(), 'sessions'), true);
-  const archived = await listJsonl(path.join(codexHome(), 'archived_sessions'), false);
+  const files = preferPlainRollouts(await listJsonl(path.join(codexHome(), 'sessions'), true, true));
+  const archived = preferPlainRollouts(await listJsonl(path.join(codexHome(), 'archived_sessions'), false, true));
   if (opts.includeArchived) files.push(...archived);
   const result = await scanFiles(opts.includeArchived ? 'codex-with-archived' : 'codex', files, parseFile);
   if (!opts.includeArchived && archived.length > 0) result.excluded['archived (resume needs unarchive)'] = archived.length;
@@ -144,6 +146,18 @@ export async function scanCodex(opts: { includeArchived?: boolean } = {}): Promi
   const titles = await threadTitles();
   result.cards = result.cards.map((c) => ({ ...c, title: titles.get(c.sessionId) ?? c.title }));
   return result;
+}
+
+/** 同一线程的 .jsonl 与 .jsonl.zst 并存时只留 .jsonl：未压缩的那份才是原生会继续追加的。 */
+export function preferPlainRollouts(files: string[]): string[] {
+  const keep = new Map<string, string>();
+  for (const f of files) {
+    const plain = f.endsWith('.zst') ? f.slice(0, -4) : f;
+    const key = path.basename(plain).match(ROLLOUT_ID)?.[1] ?? plain;
+    const cur = keep.get(key);
+    if (!cur || cur.endsWith('.zst')) keep.set(key, f);
+  }
+  return [...keep.values()];
 }
 
 const NON_TUI = new Set(['exec', 'e', 'review', 'login', 'logout', 'mcp', 'plugin', 'app-server', 'exec-server', 'app', 'completion', 'update', 'doctor', 'sandbox', 'debug', 'apply', 'a', 'queue', 'archive', 'delete', 'unarchive', 'cloud', 'features', 'help', 'agents', 'migrate-rollouts', 'remote-control']);
