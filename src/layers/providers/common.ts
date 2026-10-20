@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { LiveState, ProviderId, SessionCard } from '../types.ts';
+import { stripRoutingNote } from '../routing-note.ts';
 
 export const FIELD_LIMIT = 800;
 export const RECENT_PROMPTS = 5;
@@ -73,7 +74,7 @@ export function humanText(raw: string): string {
     const args = raw.match(/<command-args>([\s\S]*?)<\/command-args>/)?.[1]?.trim() ?? '';
     return slashCommandText(command, args);
   }
-  let text = raw.replace(NOISE_BLOCK, '').trim();
+  let text = stripRoutingNote(raw.replace(NOISE_BLOCK, '').trim()).trim();
   if (!text || NOISE_OPEN.test(text)) return '';
   if (NOISE_PREFIX.some((re) => re.test(text))) return '';
   const plain = text.match(/^\/([a-z][\w:-]*)(?:\s+([\s\S]*))?$/);
@@ -236,14 +237,14 @@ interface CacheEntry {
   p: Parsed;
 }
 /**
- * 缓存版本 = 解析相关源码（本文件、claude.ts、codex.ts）的内容哈希：解析规则一变，旧缓存自动作废。
+ * 缓存版本 = 解析相关源码（本文件、claude.ts、codex.ts、../routing-note.ts）的内容哈希：解析规则一变，旧缓存自动作废。
  * 缓存只按 mtime+size 判断文件是否变化，不会察觉规则变化，所以不能靠人记得升版本号。
  */
 let cacheVersion: string | null = null;
 function currentCacheVersion(): string {
   if (!cacheVersion) {
     const h = createHash('sha256');
-    for (const f of ['common.ts', 'claude.ts', 'codex.ts']) h.update(fs.readFileSync(new URL(f, import.meta.url)));
+    for (const f of ['common.ts', 'claude.ts', 'codex.ts', '../routing-note.ts']) h.update(fs.readFileSync(new URL(f, import.meta.url)));
     cacheVersion = h.digest('hex').slice(0, 16);
   }
   return cacheVersion;

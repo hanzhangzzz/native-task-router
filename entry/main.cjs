@@ -35,14 +35,14 @@ const pickLang = () => {
 const T = {
   zh: {
     untitled: '(无标题)', noOutput: '无输出', wrote: (p, l) => `已送达 ${p}：${l}`, focused: (l, why) => `只聚焦 ${l}：${why}`,
-    opened: (p, cwd) => `已新开 ${p}：${cwd}`, failed: (why) => `失败：${why}`,
+    opened: (p, cwd) => `已新开 ${p}：${cwd}`, forked: (l, c) => `已分叉续接 ${l} · 置信度 ${c}`, failed: (why) => `失败：${why}`,
     trayShow: (k) => `唤起输入框（${k}）`, trayHotkey: '修改快捷键…', trayLogin: '开机自动启动', trayQuit: '退出', hotkeyTitle: '修改快捷键',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
     untitled: '(untitled)', noOutput: 'no output', wrote: (p, l) => `Sent to ${p}: ${l}`,
     focused: (l) => `Switched to ${l} but didn't type into it (busy, waiting for approval, or has a draft). Your text is on the clipboard.`,
-    opened: (p, cwd) => `Opened ${p} in a new tab: ${cwd}`, failed: (why) => `Failed: ${why}`,
+    opened: (p, cwd) => `Opened ${p} in a new tab: ${cwd}`, forked: (l, c) => `Forked and continued ${l} · confidence ${c}`, failed: (why) => `Failed: ${why}`,
     trayShow: (k) => `Open input box (${k})`, trayHotkey: 'Change hotkey…', trayLogin: 'Open at login', trayQuit: 'Quit', hotkeyTitle: 'Change hotkey',
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
@@ -109,12 +109,15 @@ function runCli(args) {
   });
 }
 
-const label = (o) => (o.card ? `${o.card.title ?? t().untitled} · ${o.card.project}` : o.sessionId);
+const label = (o, card = o.card, id = o.sessionId) => (card ? `${card.title ?? t().untitled} · ${card.project}` : id);
 function describe(o) {
   switch (o.action) {
     case 'wrote': return t().wrote(o.provider, label(o));
     case 'focused-only': return t().focused(label(o), o.why);
-    case 'opened': return t().opened(o.provider, o.cwd);
+    case 'opened':
+      // 分叉送达：显示原会话的名字（新会话在新标签页里，原会话未改动）
+      if (o.forkedFrom) return t().forked(label(o, o.forkedFromCard ?? null, o.forkedFrom), typeof o.confidence === 'number' ? o.confidence.toFixed(2) : '?');
+      return t().opened(o.provider, o.cwd);
     case 'failed': return t().failed(o.why);
     default: return '';
   }

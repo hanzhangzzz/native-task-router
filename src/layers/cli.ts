@@ -77,10 +77,12 @@ async function main(): Promise<number> {
     const focusedSessionId = focusedTty ? (live.find((l) => l.tty === focusedTty)?.sessionId ?? null) : null;
     const d = await (await pickRouter()).route(text, { cards, live, previous: readPrevious(entryLogPath(), Date.now()), focusedSessionId });
     const name = (p: ProviderId, id: string) => { const c = cards.find((x) => x.provider === p && x.sessionId === id); return c ? `${p} · ${c.cwd.split('/').pop()} · ${c.title ?? c.firstPrompt?.slice(0, 40) ?? id}` : `${p}:${id}`; };
+    const conf = d.kind !== 'clarify' && d.confidence !== null ? `置信度 ${d.confidence.toFixed(2)}，` : '';
+    const fork = d.kind !== 'clarify' && d.delivery === 'fork';
     if (json) console.log(JSON.stringify(d));
-    else if (d.kind === 'continue') console.log(`续接 ${name(d.provider, d.sessionId)}（置信度 ${d.confidence}，会自动送达）`);
-    else if (d.kind === 'new') console.log(`新建 ${d.provider} 会话${d.cwd ? ` 于 ${d.cwd}` : ''}（会自动新建）`);
-    else console.log(`拿不准（${d.reason}），入口会列出：\n${d.options.map((o, i) => `  ${i + 1}. ${name(o.provider, o.sessionId)}${o.probability == null ? '' : `（${o.probability}）`}`).join('\n')}`);
+    else if (d.kind === 'continue') console.log(fork ? `[fork] 分叉续接 ${name(d.provider, d.sessionId)}（${conf}会自动送进分叉出的新会话，原会话不动，正文前加路由说明）` : `[direct] 续接 ${name(d.provider, d.sessionId)}（${conf}会直接送达）`);
+    else if (d.kind === 'new') console.log(`[${fork ? 'fork' : 'direct'}] 新建 ${d.provider} 会话${d.cwd ? ` 于 ${d.cwd}` : ''}（${conf}会自动新建${fork ? '，正文前加路由说明' : ''}）`);
+    else console.log(`[clarify] 拿不准（${d.reason}），入口会列出：\n${d.options.map((o, i) => `  ${i + 1}. ${name(o.provider, o.sessionId)}${o.probability == null ? '' : `（${o.probability}）`}`).join('\n')}`);
     console.error(`${cards.length} 个会话 · ${d.latencyMs}ms · ${d.model ?? ''}`);
     return 0;
   }
@@ -143,7 +145,7 @@ async function main(): Promise<number> {
     queue: { codex: g.queue },
     tasksRoot: process.env.NTR_TASKS_DIR || undefined,
   });
-  const cards = outcome.action === 'clarify' || ('sessionId' in outcome && outcome.sessionId) ? (await Promise.all(providers.map((p) => p.listSessions()))).flat() : [];
+  const cards = outcome.action === 'clarify' || ('sessionId' in outcome && outcome.sessionId) || (outcome.action === 'opened' && outcome.forkedFrom) ? (await Promise.all(providers.map((p) => p.listSessions()))).flat() : [];
   const card = (p: ProviderId, id: string | null) => cards.find((c) => c.provider === p && c.sessionId === id);
   if (json) {
     const enriched: Record<string, unknown> = { ...outcome };
@@ -152,6 +154,9 @@ async function main(): Promise<number> {
     } else if ('sessionId' in outcome) {
       const c = card(outcome.provider, outcome.sessionId);
       if (c) enriched.card = brief(c);
+      // 分叉送达时入口显示的是原会话的名字（新会话刚起，索引里可能还没有它）
+      const from = outcome.action === 'opened' && outcome.forkedFrom ? card(outcome.provider, outcome.forkedFrom) : undefined;
+      if (from) enriched.forkedFromCard = brief(from);
     }
     console.log(JSON.stringify(enriched));
   } else {
@@ -168,7 +173,9 @@ function describe(o: OpenOutcome, card: (p: ProviderId, id: string | null) => Se
   switch (o.action) {
     case 'wrote': return `已送达 ${name(o.provider, o.sessionId)}`;
     case 'focused-only': return `只聚焦 ${name(o.provider, o.sessionId)}: ${o.why}`;
-    case 'opened': return `已新开 ${o.provider} 于 ${o.cwd}${o.sessionId ? `（会话 ${o.sessionId}）` : ''}`;
+    case 'opened':
+      if (o.forkedFrom) return `已分叉续接 ${name(o.provider, o.forkedFrom)} · 置信度 ${o.confidence?.toFixed(2) ?? '?'}${o.sessionId ? `（新会话 ${o.sessionId}，原会话未改动）` : '（原会话未改动）'}`;
+      return `已新开 ${o.provider} 于 ${o.cwd}${o.sessionId ? `（会话 ${o.sessionId}）` : ''}`;
     case 'clarify': return `需要选择${o.reason ? `（${o.reason}）` : ''}:\n${o.suggestNew ? `  建议新建 ${o.suggestNew.provider}${o.suggestNew.cwd ? ` 于 ${o.suggestNew.cwd}` : ''}\n` : ''}${o.options.map((x, i) => `  ${i + 1}. ${name(x.provider, x.sessionId)}${x.probability === null ? '' : ` (${x.probability.toFixed(2)})`}`).join('\n')}`;
     case 'failed': return `失败: ${o.why}`;
   }

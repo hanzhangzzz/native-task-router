@@ -52,6 +52,8 @@ export interface Provider {
   resumeArgv(sessionId: string, prompt: string): string[];
   /** 新建会话的原生命令 */
   newArgv(prompt: string): string[];
+  /** 在会话 cwd 里从该会话分叉出新会话并提交 prompt：新会话带上原会话的上下文，原会话文件不被改动 */
+  forkArgv(sessionId: string, prompt: string): string[];
 }
 
 export type SurfaceId = 'iterm' | 'terminal';
@@ -95,9 +97,15 @@ export interface RouteOption {
   probability: number | null;
 }
 
+/**
+ * 自动送达的方式。direct：写进/续接原会话；fork：从原会话分叉出新会话再送达，原会话不被改动，
+ * 正文前加路由说明让 Agent 自查（中间置信档，送错也不污染原会话的原生历史）。缺省视为 direct。
+ */
+export type Delivery = 'direct' | 'fork';
+
 export type RouteDecision =
-  | { kind: 'continue'; provider: ProviderId; sessionId: string; confidence: number; reason: string }
-  | { kind: 'new'; provider: ProviderId; cwd: string | null; confidence: number | null; reason: string }
+  | { kind: 'continue'; provider: ProviderId; sessionId: string; confidence: number; reason: string; delivery?: Delivery }
+  | { kind: 'new'; provider: ProviderId; cwd: string | null; confidence: number | null; reason: string; delivery?: Delivery }
   | { kind: 'clarify'; options: RouteOption[]; reason: string };
 
 export interface Router {
@@ -108,7 +116,18 @@ export interface Router {
 export type OpenOutcome =
   | { action: 'wrote'; viewId: string; provider: ProviderId; sessionId: string }
   | { action: 'focused-only'; viewId: string; provider: ProviderId; sessionId: string; why: string }
-  | { action: 'opened'; viewId: string; provider: ProviderId; sessionId: string | null; cwd: string }
+  | {
+      action: 'opened';
+      viewId: string;
+      provider: ProviderId;
+      /** 新开视图里的会话 id；分叉时是分叉出的新 id（取不到为 null，不编造） */
+      sessionId: string | null;
+      cwd: string;
+      /** 分叉送达时的原会话 id（原会话未被改动） */
+      forkedFrom?: string;
+      /** 分叉档送达（含新建）时的项目置信度，入口据此显示 */
+      confidence?: number;
+    }
   | {
       action: 'clarify';
       options: RouteOption[];

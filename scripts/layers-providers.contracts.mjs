@@ -33,6 +33,9 @@ check('claude newArgv', claude.newArgv(nasty), ['claude', nasty]);
 check('codex resumeArgv', codex.resumeArgv('T1', nasty), ['codex', 'resume', 'T1', nasty]);
 check('codex newArgv', codex.newArgv(nasty), ['codex', nasty]);
 check('以 -- 开头的正文仍是第 4 个参数', claude.resumeArgv('S1', '--help').length, 4);
+check('claude forkArgv：-r <id> --fork-session <正文>（正文位置与 resumeArgv 一样在最后）', claude.forkArgv('S1', nasty), ['claude', '-r', 'S1', '--fork-session', nasty]);
+check('codex forkArgv：关闭更新检查，fork <id> <正文>', codex.forkArgv('T1', nasty), ['codex', '-c', 'check_for_update_on_startup=false', 'fork', 'T1', nasty]);
+check('codex fork 的 TUI 命令行被识别为交互会话（存活映射靠 lsof 取新 rollout）', parseCodexTui('/opt/x/bin/codex -c check_for_update_on_startup=false fork 019a0000-0000-7000-8000-000000000001 正文'), { resumeId: null });
 
 // ---------- Claude 夹具 ----------
 const SID = 'aaaaaaaa-0000-4000-8000-000000000001';
@@ -143,6 +146,11 @@ check('codex 截断 800', cardFromCodexLines([meta(), xu(t(1), 'あ'.repeat(2000
 // ---------- humanText 直测 ----------
 check('humanText：只剩绝对路径 → 空', humanText('/Users/x/proj/dir'), '');
 check('humanText：普通中文原样', humanText('  你好 \n'), '你好');
+{
+  const { routingNote } = await import('../src/layers/routing-note.ts');
+  check('humanText：去掉分叉送达的路由说明，只留用户原话（中文）', humanText(routingNote('把导出接口改成分页', 0.88)), '把导出接口改成分页');
+  check('humanText：去掉分叉送达的路由说明（英文）', humanText(routingNote('add pagination', 0.9)), 'add pagination');
+}
 check('humanText：凭证脱敏', humanText('Authorization: Bearer abc.DEF-123'), 'Authorization: Bearer [credential omitted]');
 
 // ---------- 行首预过滤：与全量解析等价的前提 ----------

@@ -182,5 +182,7 @@ export const claude: Provider = {
   listSessions: async () => (await scanClaude()).cards,
   liveSessions,
   resumeArgv: (sessionId, prompt) => ['claude', '-r', sessionId, prompt],
+  // --fork-session：恢复时换新的会话 id，原 <id>.jsonl 不变（2026-10-20 实测，见 open.ts 分叉送达）
+  forkArgv: (sessionId, prompt) => ['claude', '-r', sessionId, '--fork-session', prompt],
   newArgv: (prompt) => ['claude', prompt],
 };

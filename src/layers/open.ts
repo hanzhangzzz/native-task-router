@@ -5,11 +5,15 @@
 //   A1 不在这里保证（Router 的阈值负责）；A2 写入前立即重新核对 tty→pid→sessionId、状态、屏幕，
 //      任一不满足绝不 write；已存活的会话绝不再起第二个 resume 进程。
 //   A3 任何没送达的路径（focused-only / failed）都把正文放进剪贴板；clarify 把候选原样返回，正文仍在调用方手里。
+//   F  delivery === 'fork' 的续接：绝不写进开着的视图、绝不在原 id 上 resume；一律新开视图执行 forkArgv，
+//      原会话正在某个进程里跑也照样分叉（分叉是新 id，不违反"同一会话不二开"）。分叉档（续接与新建）
+//      的正文前加路由说明（routing-note.ts）；人工 pick / forceNew 与 direct 档不加。
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { ntrHome } from './providers/common.ts';
+import { routingNote } from './routing-note.ts';
 import type {
   LiveSession,
   OpenOutcome,
@@ -253,7 +257,7 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       decision = r;
       const x = r as RouteDecision & { via?: string; project?: string | null; ranked?: unknown[] };
       decisionLog = { source: 'router', kind: r.kind, model: r.model, latencyMs: r.latencyMs, costUsd: r.costUsd, reason: r.reason, via: x.via ?? null, project: x.project ?? null };
-      if (r.kind !== 'clarify') Object.assign(decisionLog, { provider: r.provider, sessionId: r.kind === 'continue' ? r.sessionId : null });
+      if (r.kind !== 'clarify') Object.assign(decisionLog, { provider: r.provider, sessionId: r.kind === 'continue' ? r.sessionId : null, confidence: r.confidence, delivery: r.delivery ?? 'direct' });
     }
 
     if (decision.kind === 'clarify') {
@@ -270,7 +274,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       // 不预先检查目录是否存在：项目常在 ~/Desktop、~/Documents 下，stat 会触发 macOS 文件夹授权弹框，被拒时还会误判为不存在。
       // 命令是 `cd <目录> && …`，目录不在时 claude 不会启动，iTerm 里能看到报错，正文也在那条命令里。
       const cwd = decision.cwd ?? newTaskDir(opts.tasksRoot ?? path.join(os.homedir(), 'ntr-tasks'), text);
-      const view = await opts.surface.openView(cwd, provider.newArgv(text), { windowId: opts.windowId });
+      const body = decision.delivery === 'fork' && decision.confidence !== null ? routingNote(text, decision.confidence) : text;
+      const view = await opts.surface.openView(cwd, provider.newArgv(body), { windowId: opts.windowId });
       const sessionId = await settle(provider, view, opts.settleMs ?? 2500);
       return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd });
     }
@@ -280,6 +285,15 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
     if (!provider) return await failed(`没有 ${decision.provider} 的 Provider`);
     const sessionId = decision.sessionId;
     const target = { provider: provider.id, sessionId };
+
+    // 分叉档：不看原会话是否存活、开在哪，一律新开视图分叉（F）。原会话的 cwd 从索引取
+    if (decision.delivery === 'fork') {
+      const card = cards.find((c) => c.provider === provider.id && c.sessionId === sessionId);
+      if (!card) return await failed(`找不到会话 ${provider.id}:${sessionId}`);
+      const view = await opts.surface.openView(card.cwd, provider.forkArgv(sessionId, routingNote(text, decision.confidence)), { windowId: opts.windowId });
+      const forkId = await settle(provider, view, opts.settleMs ?? 2500, sessionId);
+      return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId: forkId, cwd: card.cwd, forkedFrom: sessionId, confidence: decision.confidence });
+    }
 
     // 写入前立即重新取：存活映射与视图列表都用此刻的，而不是路由时的
     const holders = (await allLive()).filter((l) => l.provider === provider.id && l.sessionId === sessionId);
@@ -339,12 +353,16 @@ async function whyNotWrite(holder: LiveSession, liveNow: LiveSession[], view: Su
   return approvalPrompt(tail) ?? pendingDraft(tail);
 }
 
-/** 新开视图后等原生写出 pid/rollout，拿到真实 sessionId；超时返回 null（不编造）。 */
-async function settle(provider: Provider, view: SurfaceView, ms: number): Promise<string | null> {
+/**
+ * 新开视图后等原生写出 pid/rollout，拿到真实 sessionId；超时返回 null（不编造）。
+ * 分叉时传 notId=原会话 id：该 tty 上若暂时报的是原 id（进程还没换成分叉的新 id），不当成结果，
+ * 否则下一句的"上一句"语境会指回原会话，短句就会直接写进原会话。
+ */
+async function settle(provider: Provider, view: SurfaceView, ms: number, notId?: string): Promise<string | null> {
   if (!view.tty || ms <= 0) return null;
   const until = Date.now() + ms;
   for (;;) {
-    const hit = (await provider.liveSessions()).find((l) => l.tty === view.tty);
+    const hit = (await provider.liveSessions()).find((l) => l.tty === view.tty && l.sessionId !== notId);
     if (hit) return hit.sessionId;
     if (Date.now() >= until) return null;
     await sleep(400);

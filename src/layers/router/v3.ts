@@ -13,6 +13,12 @@
 //   - 项目里恰好有一个开在终端里的会话 → 写进它；多个开着 → 正看着的那个，否则让选；
 //   - 没开着的：项目内最近会话 ≤ resumeWithinHours → 原生 resume；更久 → 在该项目目录新建（记忆/CLAUDE.md 由原生加载）。
 // 任何模型失败一律不自动；无论自动与否都给出前 3 个去处，入口预选第 1 个。
+//
+// 三档闸门（2026-10-20，留出集按置信段汇总见 ops/research/route-accuracy-2026-10.md「三档与分叉送达」）：
+//   - ≥ minConfidence（默认 0.95）→ direct：照常写进/续接原会话（留出集自动 8%、0 次送错项目）；
+//   - [forkConfidence, minConfidence)（默认 0.85–0.95）→ fork：自动送达，但续接改为从原会话分叉，原会话不动，
+//     正文前加路由说明让 Agent 自查（这一段多送 28%，含 4 次送错项目——分叉后它们不再写进错的原生历史）；
+//   - < forkConfidence → clarify。快路径（无内容短句）始终 direct。
 import type { ProviderId, RouteContext, RouteOption, Router, RouteDecision, SessionCard, LiveSession } from '../types.ts';
 import { ago, cardKey, claudeCliComplete, cleanReply, contentFree, noiseTitle, openRouterComplete, redact } from './v2.ts';
 import type { Complete, CompleteRequest, CompleteResult } from './v2.ts';
@@ -23,8 +29,10 @@ export interface RouterV3Policy {
   model: string;
   /** 给模型看的项目数上限（按最近活跃取前 N） */
   maxProjects: number;
-  /** 自动闸门：项目置信度 ≥ 此值 */
+  /** 直接送达闸门：项目置信度 ≥ 此值 → delivery 'direct'（NTR_ROUTER_MIN_CONFIDENCE） */
   minConfidence: number;
+  /** 分叉送达闸门：置信度在 [此值, minConfidence) → delivery 'fork'；更低 → clarify（NTR_ROUTER_FORK_CONFIDENCE） */
+  forkConfidence: number;
   /** 项目内最近会话在此小时数内 → 续接它；否则新建 */
   resumeWithinHours: number;
   /** 无内容短句沿用入口上一句去处的时间窗（分钟） */
@@ -35,7 +43,8 @@ export interface RouterV3Policy {
 export const DEFAULT_POLICY_V3: RouterV3Policy = {
   model: 'opus',
   maxProjects: 40,
-  minConfidence: 0.85,
+  minConfidence: 0.95,
+  forkConfidence: 0.85,
   resumeWithinHours: 24,
   followupMinutes: 5,
   timeoutMs: 30000,
@@ -211,9 +220,19 @@ export function createRouterV3(opts: RouterV3Options = {}): Router {
   const policy: RouterV3Policy = { ...DEFAULT_POLICY_V3, ...opts.policy };
   const env = opts.env ?? process.env;
   if (env.NTR_ROUTER_MODEL) policy.model = env.NTR_ROUTER_MODEL;
-  // 自动闸门阈值可调：留出集上 0.85 → 自动 36%、送错项目 1.6%；0.9 → 21%、1.2%；0.95 → 8%、0%
-  const t = Number(env.NTR_ROUTER_MIN_CONFIDENCE);
-  if (env.NTR_ROUTER_MIN_CONFIDENCE && t >= 0 && t <= 1) policy.minConfidence = t;
+  // 阈值可调；非法配置直接报错，不静默退回默认（用户以为改了档位，实际没改，比报错更糟）
+  const threshold = (name: string): number | undefined => {
+    const raw = env[name];
+    if (raw === undefined || raw.trim() === '') return undefined;
+    const t = Number(raw);
+    if (!Number.isFinite(t) || t < 0 || t > 1) throw new Error(`${name}=${raw} 无效：应为 0 到 1 之间的数`);
+    return t;
+  };
+  policy.minConfidence = threshold('NTR_ROUTER_MIN_CONFIDENCE') ?? policy.minConfidence;
+  policy.forkConfidence = threshold('NTR_ROUTER_FORK_CONFIDENCE') ?? policy.forkConfidence;
+  if (policy.forkConfidence > policy.minConfidence) {
+    throw new Error(`NTR_ROUTER_FORK_CONFIDENCE（${policy.forkConfidence}）不能高于 NTR_ROUTER_MIN_CONFIDENCE（${policy.minConfidence}）`);
+  }
   const viaOpenRouter = !opts.complete && env.NTR_ROUTER_BACKEND === 'openrouter';
   const complete = opts.complete ?? (viaOpenRouter ? openRouterComplete(env) : claudeCliComplete());
   if (viaOpenRouter && !policy.model.includes('/')) policy.model = `anthropic/claude-${policy.model}-5.5`;
@@ -228,7 +247,8 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
   const fast = fastPath(text, ctx, policy);
   if (fast) {
     const auto = fast.decision.kind !== 'clarify';
-    return { ...fast.decision, ...base, latencyMs: Date.now() - started, ranked: fast.ranked, auto, holdReason: auto ? null : fast.decision.reason, via: 'fast' };
+    const delivery = auto ? { delivery: 'direct' as const } : {};
+    return { ...fast.decision, ...delivery, ...base, latencyMs: Date.now() - started, ranked: fast.ranked, auto, holdReason: auto ? null : fast.decision.reason, via: 'fast' };
   }
 
   const projects = groupProjects(ctx.cards);
@@ -272,15 +292,18 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
   });
 
   if (r.error || !parsed.ok) return hold(r.error ? '模型失败或超时' : '模型输出无效');
-  if (parsed.confidence === null || parsed.confidence < policy.minConfidence) return hold('对项目的把握不足');
+  if (parsed.confidence === null || parsed.confidence < policy.forkConfidence) return hold('对项目的把握不足');
   const conf = parsed.confidence;
+  const delivery = conf >= policy.minConfidence ? ('direct' as const) : ('fork' as const);
+  const auto = { ...common, auto: true, holdReason: null, delivery };
   if (parsed.choice === 'NEW_PROJECT') {
-    return { kind: 'new', provider: latest?.provider ?? 'claude', cwd: null, confidence: conf, reason: '模型判定不属于任何已有项目', ...common, auto: true, holdReason: null };
+    return { kind: 'new', provider: latest?.provider ?? 'claude', cwd: null, confidence: conf, reason: '模型判定不属于任何已有项目', ...auto };
   }
   const p = byCwd.get(parsed.choice!)!;
   const pick = pickInProject(p, ctx, nowMs, policy.resumeWithinHours);
   if (pick.kind === 'ambiguous') return hold(`项目 ${base2(p.cwd)} 里同时开着 ${pick.candidates.length} 个会话`);
-  if (pick.kind === 'new') return { kind: 'new', provider: pick.provider, cwd: pick.cwd, confidence: conf, reason: `属于项目 ${base2(p.cwd)}，其最近会话已超过 ${policy.resumeWithinHours} 小时，新建`, ...common, auto: true, holdReason: null };
+  if (pick.kind === 'new') return { kind: 'new', provider: pick.provider, cwd: pick.cwd, confidence: conf, reason: `属于项目 ${base2(p.cwd)}，其最近会话已超过 ${policy.resumeWithinHours} 小时，新建`, ...auto };
   const why = { open: '正开在终端里', focused: '正看着', recent: '项目内最近的会话' }[pick.why];
-  return { kind: 'continue', provider: pick.provider, sessionId: pick.sessionId, confidence: conf, reason: `属于项目 ${base2(p.cwd)}，续接${why}`, ...common, auto: true, holdReason: null };
+  const how = delivery === 'fork' ? '分叉续接' : '续接';
+  return { kind: 'continue', provider: pick.provider, sessionId: pick.sessionId, confidence: conf, reason: `属于项目 ${base2(p.cwd)}，${how}${why}`, ...auto };
 }
