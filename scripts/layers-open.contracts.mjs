@@ -9,6 +9,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
 const { open, approvalPrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
+const { routingNote, stripRoutingNote } = await import('../src/layers/routing-note.ts');
 
 let pass = 0;
 let fail = 0;
@@ -82,7 +83,7 @@ const card = (provider, sessionId, cwd, extra = {}) => ({
 });
 
 /** liveSeq: 每次 liveSessions 调用依次返回的列表（最后一个重复使用），用于模拟"路由之后映射变了" */
-function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails = false, writeFails = false, clipFails = false } = {}) {
+function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails = false, writeFails = false, clipFails = false, newTty = null } = {}) {
   const calls = { write: [], focus: [], openView: [], queue: [], clip: [], liveCalls: 0, viewsCalls: 0 };
   const mkProvider = (id) => ({
     id,
@@ -94,6 +95,7 @@ function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails 
     },
     resumeArgv: (s, p) => (id === 'claude' ? ['claude', '-r', s, p] : ['codex', 'resume', s, p]),
     newArgv: (p) => [id, p],
+    forkArgv: (s, p) => (id === 'claude' ? ['claude', '-r', s, '--fork-session', p] : ['codex', 'fork', s, p]),
   });
   const surface = {
     id: 'iterm',
@@ -101,7 +103,7 @@ function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails 
     focus: async (v) => void calls.focus.push(v),
     openView: async (cwd, argv, o) => {
       calls.openView.push({ cwd, argv, o });
-      return { surface: 'iterm', viewId: 'NEWVIEW', tty: null, title: '' };
+      return { surface: 'iterm', viewId: 'NEWVIEW', tty: newTty, title: '' };
     },
     write: async (v, t) => {
       if (writeFails) throw new Error('boom');
@@ -331,6 +333,83 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('模型选了候选之外的 id → clarify(不送)', ghost.kind === 'clarify');
   globalThis.fetch = realFetch;
   delete process.env.openrouter_api_key;
+}
+
+// ---- 11. 分叉送达（delivery: 'fork'）与路由说明头 ----
+{
+  const note = (t, c) => routingNote(t, c);
+  check('说明头：含汉字 → 中文，置信度两位小数，正文在空行之后原样保留',
+    note(TEXT, 0.876) === `[路由说明] 这句话由 Native Task Router 自动送达，对项目的置信度 0.88。如果它与这个项目或会话正在做的事无关，请说明原因并停下，不要修改任何文件。\n\n${TEXT}`, note(TEXT, 0.876));
+  check('说明头：无汉字 → 英文', note('add pagination to the export API', 0.9) === '[Routing note] This message was delivered automatically by Native Task Router (project confidence 0.90). If it is unrelated to what this project or session is working on, say so and stop without changing any files.\n\nadd pagination to the export API');
+  check('说明头：只有假名/韩文不算汉字 → 英文', note('テスト 한국어', 0.9).startsWith('[Routing note]'));
+  check('说明头：不含本机路径', !/\/Users\/|\/home\/|~\//.test(note(TEXT, 0.9) + note('x', 0.9)));
+  check('stripRoutingNote 往返还原用户原话（中/英）', stripRoutingNote(note(TEXT, 0.9)) === TEXT && stripRoutingNote(note('fix it', 0.86)) === 'fix it');
+  check('stripRoutingNote 不动普通文本与正文中间出现的说明字样', stripRoutingNote(TEXT) === TEXT && stripRoutingNote(`前缀\n\n${note('x', 0.9)}`) === `前缀\n\n${note('x', 0.9)}`);
+
+  const forkRoute = (provider, sessionId, confidence = 0.88) => route({ kind: 'continue', provider, sessionId, confidence, reason: 'x', delivery: 'fork' });
+  const sameArgv = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  // 原会话存活、空闲、视图干净：direct 档会 write，fork 档必须新开分叉
+  const w = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
+  const r = await open(TEXT, { ...w.opts, windowId: 5, router: forkRoute('claude', 'S1') });
+  check('fork：原会话存活空闲也不 write、不 queue、不 focus 原视图', w.calls.write.length === 0 && w.calls.queue.length === 0 && w.calls.focus.length === 0, JSON.stringify(w.calls));
+  check('fork：恰一次 openView(原 cwd, forkArgv(原 id, 说明头+正文), windowId)', w.calls.openView.length === 1 && w.calls.openView[0].cwd === root && w.calls.openView[0].o.windowId === 5
+    && sameArgv(w.calls.openView[0].argv, ['claude', '-r', 'S1', '--fork-session', note(TEXT, 0.88)]), JSON.stringify(w.calls.openView));
+  check('fork：argv 不是在原 id 上 resume（含 --fork-session）', w.calls.openView[0].argv.includes('--fork-session') && !sameArgv(w.calls.openView[0].argv, ['claude', '-r', 'S1', TEXT]));
+  check('fork：说明头在正文前', w.calls.openView[0].argv.at(-1).startsWith('[路由说明]') && w.calls.openView[0].argv.at(-1).endsWith(TEXT));
+  check('fork：outcome opened 记 forkedFrom 与置信度；新 id 取不到时为 null（不编造为原 id）', r.action === 'opened' && r.forkedFrom === 'S1' && r.confidence === 0.88 && r.sessionId === null && r.cwd === root, JSON.stringify(r));
+  const log = fs.readFileSync(w.opts.logPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+  check('fork：入口日志 decision 记 delivery=fork 与置信度，input 是用户原话（不含说明头）', log.decision.delivery === 'fork' && log.decision.confidence === 0.88 && log.input === TEXT, JSON.stringify(log.decision));
+
+  const c = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5')]], views: [view('VC', '/dev/ttys5')] });
+  const rc = await open('fix the flaky test', { ...c.opts, router: forkRoute('codex', 'C1', 0.9) });
+  check('fork Codex：空闲也不走 queue，新开 codex fork <id> <英文说明头+正文>', rc.action === 'opened' && c.calls.queue.length === 0 && c.calls.write.length === 0
+    && sameArgv(c.calls.openView[0].argv, ['codex', 'fork', 'C1', note('fix the flaky test', 0.9)]), JSON.stringify(c.calls.openView));
+
+  const b = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], views: [view('V1', '/dev/ttys1')], tails: { V1: CLAUDE_APPROVAL } });
+  const rb = await open(TEXT, { ...b.opts, router: forkRoute('claude', 'S1') });
+  check('fork：原会话忙/停在审批框也照样分叉（不是 focused-only）', rb.action === 'opened' && rb.forkedFrom === 'S1' && b.calls.openView.length === 1 && b.calls.clip.length === 0);
+  const two = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'idle', 1), live('claude', 'S1', '/dev/ttys2', 'idle', 2)]] });
+  const rt = await open(TEXT, { ...two.opts, router: forkRoute('claude', 'S1') });
+  check('fork：原会话被两个进程持有也能分叉（新 id 不与任何进程冲突）', rt.action === 'opened' && two.calls.openView.length === 1);
+  const cold = world({ cards: [card('claude', 'S2', root)] });
+  await open(TEXT, { ...cold.opts, router: forkRoute('claude', 'S2') });
+  check('fork：原会话未运行 → 仍是 forkArgv，不是 resumeArgv', cold.calls.openView[0].argv.includes('--fork-session'));
+  const miss = world({});
+  const rm = await open(TEXT, { ...miss.opts, router: forkRoute('claude', 'NOPE') });
+  check('fork：找不到原会话 → failed + 剪贴板，不开视图', rm.action === 'failed' && miss.calls.openView.length === 0 && miss.calls.clip[0] === TEXT);
+
+  // settle：新视图的 tty 上先报原 id（进程尚未换成分叉 id），再报新 id → 取新 id
+  const st = world({ cards: [card('claude', 'S1', root)], newTty: '/dev/ttys9', liveSeq: [[], [live('claude', 'S1', '/dev/ttys9')], [live('claude', 'FORK1', '/dev/ttys9')]] });
+  const rs = await open(TEXT, { ...st.opts, settleMs: 3000, router: forkRoute('claude', 'S1') });
+  check('fork settle：不把原 id 当成分叉结果，等到新 id', rs.action === 'opened' && rs.sessionId === 'FORK1' && rs.forkedFrom === 'S1', JSON.stringify(rs));
+  let seen = null;
+  const spy = { route: async (_t, ctx) => ((seen = ctx), { kind: 'clarify', options: [], reason: 'x', latencyMs: 1, costUsd: null, model: null }) };
+  await open('继续', { ...st.opts, router: spy });
+  check('fork 之后下一句的"上一句"去处是分叉出的新会话，不是原会话', seen.previous?.sessionId === 'FORK1', JSON.stringify(seen.previous));
+  check('fork 出的新会话进入 ← 历史', readHistory(st.opts.logPath).some((h) => h.sessionId === 'FORK1'));
+
+  // 分叉档的 new：照旧在项目目录新建，正文前加说明头；direct 档的 new 不加
+  const n1 = world({});
+  const proj = fs.mkdtempSync(path.join(root, 'proj-'));
+  await open(TEXT, { ...n1.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.86, reason: 'x', delivery: 'fork' }) });
+  check('fork 档 new：在项目目录 newArgv(说明头+正文)', n1.calls.openView[0].cwd === proj && sameArgv(n1.calls.openView[0].argv, ['claude', note(TEXT, 0.86)]));
+  const n2 = world({});
+  await open(TEXT, { ...n2.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.97, reason: 'x', delivery: 'direct' }) });
+  check('direct 档 new：正文不加说明头', sameArgv(n2.calls.openView[0].argv, ['claude', TEXT]));
+
+  // direct 档与人工 pick：原样写入，不加说明头
+  const d = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
+  const rd = await open(TEXT, { ...d.opts, router: route({ kind: 'continue', provider: 'claude', sessionId: 'S1', confidence: 0.97, reason: 'x', delivery: 'direct' }) });
+  check('direct 档：写进原会话、正文原样', rd.action === 'wrote' && d.calls.write[0].t === TEXT && d.calls.openView.length === 0);
+  const pk = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
+  const rp = await open(TEXT, { ...pk.opts, router: forkRoute('claude', 'S1'), pick: { provider: 'claude', sessionId: 'S1' } });
+  check('人工 pick：始终 direct（即使 Router 会给 fork），不加说明头', rp.action === 'wrote' && pk.calls.write[0].t === TEXT && pk.calls.openView.length === 0);
+  const pkc = world({ cards: [card('claude', 'S2', root)] });
+  await open(TEXT, { ...pkc.opts, router: forkRoute('claude', 'S2'), pick: { provider: 'claude', sessionId: 'S2' } });
+  check('人工 pick 冷会话：resumeArgv(原正文)，不分叉', sameArgv(pkc.calls.openView[0].argv, ['claude', '-r', 'S2', TEXT]));
+  const fn = world({});
+  await open(TEXT, { ...fn.opts, router: forkRoute('claude', 'S2'), forceNew: { provider: 'claude', cwd: proj } });
+  check('人工 --new：不加说明头', sameArgv(fn.calls.openView[0].argv, ['claude', TEXT]));
 }
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);

@@ -260,5 +260,7 @@ export const codex: Provider = {
   listSessions: async () => (await scanCodex()).cards,
   liveSessions,
   resumeArgv: (sessionId, prompt) => ['codex', 'resume', sessionId, prompt],
+  // `codex fork <id> <prompt>`：新 thread id、新 rollout 文件，原 rollout 不变（2026-10-20 实测）
+  forkArgv: (sessionId, prompt) => ['codex', '-c', 'check_for_update_on_startup=false', 'fork', sessionId, prompt],
   newArgv: (prompt) => ['codex', prompt],
 };

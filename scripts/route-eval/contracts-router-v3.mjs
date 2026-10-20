@@ -92,10 +92,53 @@ const Q = '把导出报表的接口改成分页返回';
   let called = false;
   const r5 = await router(async () => { called = true; return pick(B, 0.95)(); }).route('继续', ctx({ focusedSessionId: 'b1', live: [{ provider: 'claude', sessionId: 'b1', pid: 1, tty: '/dev/ttys001', state: 'idle' }] }));
   check('短句走快路径，不调模型', r5.via === 'fast' && r5.kind === 'continue' && r5.sessionId === 'b1' && !called);
-  const r7 = await createRouterV3({ complete: pick(B, 0.9), env: { NTR_ROUTER_MIN_CONFIDENCE: '0.95' }, now: () => T0 }).route(Q, ctx());
-  check('NTR_ROUTER_MIN_CONFIDENCE 提高阈值后 0.9 不再自动', r7.kind === 'clarify' && !r7.auto);
+  const r7 = await createRouterV3({ complete: pick(B, 0.9), env: { NTR_ROUTER_MIN_CONFIDENCE: '0.95', NTR_ROUTER_FORK_CONFIDENCE: '0.95' }, now: () => T0 }).route(Q, ctx());
+  check('两个阈值都设 0.95（关掉分叉档）后 0.9 不再自动', r7.kind === 'clarify' && !r7.auto);
   const r6 = await createRouterV3({ env: { NTR_ROUTER_BACKEND: 'openrouter' }, now: () => T0 }).route(Q, ctx());
   check('OpenRouter 后端缺 key → 不自动（不联网）', r6.kind === 'clarify' && !r6.auto);
+}
+
+// ---- 三档闸门：≥direct → direct；[fork, direct) → fork；<fork → clarify ----
+{
+  check('默认阈值：direct 0.95、fork 0.85', DEFAULT_POLICY_V3.minConfidence === 0.95 && DEFAULT_POLICY_V3.forkConfidence === 0.85);
+  const at = (conf, env = {}, target = B, c = ctx()) => createRouterV3({ complete: pick(target, conf), env, now: () => T0 }).route(Q, c);
+  const tier = (r) => (r.kind === 'clarify' ? 'clarify' : r.delivery);
+  const cases = [[1, 'direct'], [0.95, 'direct'], [0.9499, 'fork'], [0.9, 'fork'], [0.85, 'fork'], [0.8499, 'clarify'], [0.5, 'clarify'], [0, 'clarify']];
+  for (const [conf, want] of cases) {
+    const r = await at(conf, {});
+    check(`默认阈值 置信度 ${conf} → ${want}`, tier(r) === want && r.auto === (want !== 'clarify'), JSON.stringify({ kind: r.kind, delivery: r.delivery, auto: r.auto }));
+  }
+  const rf = await at(0.88);
+  check('fork 档续接：kind continue、仍是项目内同一会话、原因写明分叉', rf.kind === 'continue' && rf.sessionId === 'b1' && rf.delivery === 'fork' && rf.reason.includes('分叉'), rf.reason);
+  const rn = await at(0.88, {}, C);
+  check('fork 档新建（项目最近会话 >24h）：kind new、delivery fork', rn.kind === 'new' && rn.cwd === C && rn.delivery === 'fork' && rn.auto);
+  const rnp = await at(0.9, {}, 'NEW_PROJECT');
+  check('fork 档 NEW_PROJECT：kind new、cwd null、delivery fork', rnp.kind === 'new' && rnp.cwd === null && rnp.delivery === 'fork');
+  const rd = await at(0.97, {}, C);
+  check('direct 档新建：delivery direct', rd.kind === 'new' && rd.delivery === 'direct');
+  const live2 = [{ provider: 'claude', sessionId: 'a1', pid: 1, tty: '/dev/ttys001', state: 'idle' }, { provider: 'codex', sessionId: 'a2', pid: 2, tty: '/dev/ttys002', state: 'idle' }];
+  check('fork 档也遵守项目内多个开着 → 不自动', (await at(0.9, {}, A, ctx({ live: live2 }))).kind === 'clarify');
+  const rc = await at(0.6);
+  check('clarify 不带 delivery', rc.kind === 'clarify' && rc.delivery === undefined);
+
+  // 环境变量
+  check('NTR_ROUTER_MIN_CONFIDENCE=0.9：0.92 → direct', tier(await at(0.92, { NTR_ROUTER_MIN_CONFIDENCE: '0.9' })) === 'direct');
+  check('NTR_ROUTER_MIN_CONFIDENCE=0.9：0.89 → fork', tier(await at(0.89, { NTR_ROUTER_MIN_CONFIDENCE: '0.9' })) === 'fork');
+  check('NTR_ROUTER_FORK_CONFIDENCE=0.7：0.75 → fork', tier(await at(0.75, { NTR_ROUTER_FORK_CONFIDENCE: '0.7' })) === 'fork');
+  check('NTR_ROUTER_FORK_CONFIDENCE=0.7：0.69 → clarify', tier(await at(0.69, { NTR_ROUTER_FORK_CONFIDENCE: '0.7' })) === 'clarify');
+  check('fork = direct（关掉分叉档）：0.94 → clarify，0.95 → direct', tier(await at(0.94, { NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'clarify' && tier(await at(0.95, { NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'direct');
+  check('空串视为未设置', tier(await at(0.9, { NTR_ROUTER_MIN_CONFIDENCE: '', NTR_ROUTER_FORK_CONFIDENCE: ' ' })) === 'fork');
+  const throws = (env) => { try { createRouterV3({ complete: pick(B, 0.9), env }); return false; } catch (e) { return e instanceof Error; } };
+  check('非法：FORK 高于 MIN → 报错', throws({ NTR_ROUTER_FORK_CONFIDENCE: '0.97' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '0.8' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '0.9', NTR_ROUTER_FORK_CONFIDENCE: '0.91' }));
+  check('非法：不在 0–1 或不是数 → 报错', throws({ NTR_ROUTER_FORK_CONFIDENCE: '-0.1' }) && throws({ NTR_ROUTER_FORK_CONFIDENCE: '1.5' }) && throws({ NTR_ROUTER_FORK_CONFIDENCE: 'abc' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '2' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: 'NaN' }));
+  check('合法边界不报错：0 与 1', !throws({ NTR_ROUTER_MIN_CONFIDENCE: '1', NTR_ROUTER_FORK_CONFIDENCE: '0' }));
+
+  // 快路径保持 direct
+  const live1 = [{ provider: 'claude', sessionId: 'b1', pid: 1, tty: '/dev/ttys001', state: 'idle' }];
+  const f1 = await createRouterV3({ complete: async () => { throw new Error('不应调用'); }, env: {}, now: () => T0 }).route('继续', ctx({ live: live1, focusedSessionId: 'b1' }));
+  check('快路径（正看着的会话）→ direct', f1.via === 'fast' && f1.kind === 'continue' && f1.delivery === 'direct');
+  const f2 = await createRouterV3({ complete: async () => { throw new Error('不应调用'); }, env: {}, now: () => T0 }).route('继续', ctx({ previous: { utterance: 'x', provider: 'claude', sessionId: 'c1', minutesAgo: 1 } }));
+  check('快路径（承接上一句）→ direct', f2.via === 'fast' && f2.delivery === 'direct');
 }
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);

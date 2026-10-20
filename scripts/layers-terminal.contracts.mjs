@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { parseRows, tailLines } from '../src/layers/surfaces/terminal.ts';
+import { openTerminalView, parseRows, tailLines } from '../src/layers/surfaces/terminal.ts';
 import { createMulti, decodeViewId, encodeViewId, pickTarget } from '../src/layers/surfaces/multi.ts';
 import { guarded } from '../src/layers/guard.ts';
 import { open } from '../src/layers/open.ts';
@@ -58,7 +58,20 @@ const interp = scripts.flatMap((s) => [...s.matchAll(/\$\{([^}]*)\}/g)].map((m) 
 check(`terminal.ts 脚本源码仅插入 FIND (${scripts.length} 个脚本, 插值 ${JSON.stringify(interp)})`, scripts.length >= 5 && interp.every((x) => x === 'FIND'));
 const allScripts = [...scripts, ...[...src.matchAll(/osa\('([^']*)'/g)].map((m) => m[1])];
 const activating = allScripts.filter((s) => /\bactivate\b/.test(s));
-check('terminal.ts 只有一处脚本 activate（focus 末尾），openView 冷启动用 launch（不激活）', activating.length === 1 && activating[0].trim() === 'tell application "Terminal" to activate' && /async focus\(viewId\) \{\n\s+await selectView\(viewId\);\n\s+await osa\('tell application "Terminal" to activate'\);/.test(src) && /to launch'/.test(src), JSON.stringify(activating));
+check('terminal.ts 只有两处脚本 activate：focus 末尾与 openView 冷启动分支', activating.length === 2 && activating.every((a) => a.trim() === 'tell application "Terminal" to activate') && /async focus\(viewId\) \{\n\s+await selectView\(viewId\);\n\s+await osa\('tell application "Terminal" to activate'\);/.test(src) && /if \(cold\) await deps\.osa\('tell application "Terminal" to activate'\);/.test(src), JSON.stringify(activating));
+
+// ---- 4b. openView 冷/热两个分支的脚本序列（假 osa，不碰真实 Terminal）----
+{
+  const seq = async (running) => {
+    const scripts = [];
+    const v = await openTerminalView('/work/proj', ['claude', 'x'], { running: async () => running, osa: async (sc, args) => { scripts.push(sc.trim().startsWith('on run') ? 'do script' : sc); return sc.includes('do script') ? `/dev/ttys042${FS}t` : ''; } });
+    return { v, scripts };
+  };
+  const cold = await seq(false);
+  check('openView 冷启动：launch → do script → activate（与 iTerm 冷启动一致，切到前台）', JSON.stringify(cold.scripts) === JSON.stringify(['tell application "Terminal" to launch', 'do script', 'tell application "Terminal" to activate']) && cold.v.tty === '/dev/ttys042', JSON.stringify(cold.scripts));
+  const warm = await seq(true);
+  check('openView 已在运行：只 do script，不 launch、不 activate（不抢焦点）', JSON.stringify(warm.scripts) === JSON.stringify(['do script']), JSON.stringify(warm.scripts));
+}
 
 // ---- 5. 组合 Surface：合并、分发、目标选择、单边失败 ----
 function fakeSurface(id, views, { failList = false } = {}) {

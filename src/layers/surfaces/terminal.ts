@@ -80,6 +80,36 @@ end run`, [viewId]);
   if (r !== 'ok') throw new Error(`Terminal 视图不存在: ${viewId}`);
 }
 
+/**
+ * 新开一个窗口执行命令。`do script` 不带 in 时总是新开窗口；要开成 tab 只能用 System Events
+ * 模拟 ⌘T，会抢焦点且依赖键盘布局，所以不做。
+ * Terminal 没在运行时（冷启动）：先 `launch`（不开默认窗口），再 `do script`，避免多出一个空白的启动窗口；
+ * 窗口建好后 `activate` 把 Terminal 带到前台，与 iTerm 冷启动一致——否则用户看不到刚启动的 Terminal。
+ * Terminal 已在运行时不激活（不抢焦点；用户在别的应用里也能继续做事）。
+ * deps 只为契约测试注入（scripts/layers-terminal.contracts.mjs 用假 osa 断言两个分支的脚本序列）；
+ * 冷启动分支的真实效果会抢前台，live 验收用先启动好的 Terminal 跑，不覆盖它。
+ */
+export async function openTerminalView(
+  cwd: string,
+  argv: string[],
+  deps: { running: () => Promise<boolean>; osa: (script: string, args?: string[]) => Promise<string> } = { running: terminalRunning, osa },
+): Promise<SurfaceView> {
+  const command = buildCommand(cwd, argv);
+  const cold = !(await deps.running());
+  if (cold) await deps.osa('tell application "Terminal" to launch');
+  const out = await deps.osa(`
+on run argv
+  tell application "Terminal"
+    set t to do script (item 1 of argv)
+    return (tty of t) & (character id 31) & (custom title of t)
+  end tell
+end run`, [command]);
+  const v = parseRows(out)[0];
+  if (!v) throw new Error('Terminal 新窗口没有返回 tty');
+  if (cold) await deps.osa('tell application "Terminal" to activate');
+  return v;
+}
+
 export const terminal: Surface = {
   id: 'terminal',
 
@@ -105,25 +135,7 @@ end tell`);
     await osa('tell application "Terminal" to activate');
   },
 
-  /**
-   * 新开一个窗口执行命令。`do script` 不带 in 时总是新开窗口；要开成 tab 只能用 System Events
-   * 模拟 ⌘T，会抢焦点且依赖键盘布局，所以不做。Terminal 没在运行时先 `launch`（不开默认窗口、
-   * 不激活），再 `do script`，避免多出一个空白的启动窗口。不激活 Terminal。
-   */
-  async openView(cwd, argv) {
-    const command = buildCommand(cwd, argv);
-    if (!(await terminalRunning())) await osa('tell application "Terminal" to launch');
-    const out = await osa(`
-on run argv
-  tell application "Terminal"
-    set t to do script (item 1 of argv)
-    return (tty of t) & (character id 31) & (custom title of t)
-  end tell
-end run`, [command]);
-    const v = parseRows(out)[0];
-    if (!v) throw new Error('Terminal 新窗口没有返回 tty');
-    return v;
-  },
+  openView: (cwd, argv) => openTerminalView(cwd, argv),
 
   /**
    * `do script <正文> in <tab>` 把正文原样写进 tab 的输入并追加一个回车，回车即提交。live 验收②
