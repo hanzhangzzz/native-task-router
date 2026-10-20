@@ -14,18 +14,20 @@
 // （句子里明确点名 codex / claude 时用点名的）；NEW_PROJECT → 新目录。
 // 任何模型失败一律不自动；无论自动与否都给出前 3 个去处，入口预选第 1 个。
 //
-// 三档闸门（置信度描述"项目 + 线程"整体决策）：
-//   - ≥ minConfidence（默认 0.95）→ direct：照常写进/续接原会话；
-//   - [forkConfidence, minConfidence)（默认 0.85–0.95）→ 续接改为从原会话分叉（fork），原会话不动，正文前加路由说明；
-//     决策是 NEW 时直接新建（新建不碰任何已有会话，没有污染风险）；
-//   - < forkConfidence → clarify。快路径始终 direct。
+// 闸门（置信度描述"项目 + 线程"整体决策；档位语义不变，数字按 v3.1 在 dev 上重新标定，见研究文档「Router v3.1」）：
+//   - 续接 ≥ minConfidence（默认 0.92；dev 上该档项目错 0、线程错 ≤5% 的最低值）→ direct：写进/续接原会话；
+//   - 续接 [forkConfidence, minConfidence)（默认 0.88；dev 上该段项目与线程全对 ≥90% 的最低值）→ fork：从原会话分叉，
+//     原会话不动，正文前加路由说明；
+//   - NEW（项目内新开或新目录）≥ newConfidence（默认 0.60；dev 上 NEW 首选项目正确率 ≥90% 的最低值）→ 自动新建，
+//     新会话正文前加"自动新建在项目 X"的路由说明（新建不碰任何已有会话，剩下的风险只是开错目录）；
+//   - 其余 → clarify。快路径始终 direct。
 import type { ProviderId, RouteContext, RouteOption, Router, RouteDecision, SessionCard, LiveSession } from '../types.ts';
 import { ago, cardKey, claudeCliComplete, cleanReply, contentFree, noiseTitle, openRouterComplete, redact } from './v2.ts';
 import type { Complete, CompleteRequest, CompleteResult } from './v2.ts';
 
 // v3.0-project-first-opus-t0.85 → v3.1：模型同时选项目与项目内线程（或 NEW），删除项目内选会话的固定规则（pickInProject、24h 续接窗）；
-// fork 档的 NEW 直接新建；快路径不再自动承接正看着的会话，改为让人确认。
-export const ROUTER_V3_VERSION = 'v3.1-project-thread-opus-k4w14';
+// NEW 单设阈值并加新建路由说明；三档数字按 v3.1 在 dev 上重标定（0.92 / 0.88 / NEW 0.60）；快路径不再自动承接正看着的会话，改为让人确认。
+export const ROUTER_V3_VERSION = 'v3.1-project-thread-opus-k4w14-d92f88n60';
 
 export interface RouterV3Policy {
   model: string;
@@ -35,10 +37,12 @@ export interface RouterV3Policy {
   threadsPerProject: number;
   /** 只列这么多天内活跃过的线程；窗内一条都没有时仍列最近 1 条 */
   threadWindowDays: number;
-  /** 直接送达闸门：置信度 ≥ 此值 → delivery 'direct'（NTR_ROUTER_MIN_CONFIDENCE） */
+  /** 直接送达闸门：续接的置信度 ≥ 此值 → delivery 'direct'（NTR_ROUTER_MIN_CONFIDENCE） */
   minConfidence: number;
-  /** 分叉送达闸门：置信度在 [此值, minConfidence) → 续接走 fork、NEW 直接新建；更低 → clarify（NTR_ROUTER_FORK_CONFIDENCE） */
+  /** 分叉送达闸门：续接的置信度在 [此值, minConfidence) → fork；更低 → clarify（NTR_ROUTER_FORK_CONFIDENCE） */
   forkConfidence: number;
+  /** 新建闸门：决策为 NEW（项目内新开或新目录）时置信度 ≥ 此值 → 自动新建并加路由说明；更低 → clarify（NTR_ROUTER_NEW_CONFIDENCE） */
+  newConfidence: number;
   /** 无内容短句沿用入口上一句去处的时间窗（分钟） */
   followupMinutes: number;
   timeoutMs: number;
@@ -49,8 +53,9 @@ export const DEFAULT_POLICY_V3: RouterV3Policy = {
   maxProjects: 40,
   threadsPerProject: 4,
   threadWindowDays: 14,
-  minConfidence: 0.95,
-  forkConfidence: 0.85,
+  minConfidence: 0.92,
+  forkConfidence: 0.88,
+  newConfidence: 0.6,
   followupMinutes: 5,
   timeoutMs: 30000,
 };
@@ -252,6 +257,7 @@ export function createRouterV3(opts: RouterV3Options = {}): Router {
   };
   policy.minConfidence = threshold('NTR_ROUTER_MIN_CONFIDENCE') ?? policy.minConfidence;
   policy.forkConfidence = threshold('NTR_ROUTER_FORK_CONFIDENCE') ?? policy.forkConfidence;
+  policy.newConfidence = threshold('NTR_ROUTER_NEW_CONFIDENCE') ?? policy.newConfidence;
   if (policy.forkConfidence > policy.minConfidence) {
     throw new Error(`NTR_ROUTER_FORK_CONFIDENCE（${policy.forkConfidence}）不能高于 NTR_ROUTER_MIN_CONFIDENCE（${policy.minConfidence}）`);
   }
@@ -312,11 +318,11 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
   });
 
   if (r.error || !parsed.ok) return hold(r.error ? '模型失败或超时' : '模型输出无效');
-  if (parsed.confidence === null || parsed.confidence < policy.forkConfidence) return hold('对项目和线程的把握不足');
   const conf = parsed.confidence;
+  if (conf === null || conf < (dest!.thread ? policy.forkConfidence : policy.newConfidence)) return hold('对项目和线程的把握不足');
   const why = parsed.reason ? `：${parsed.reason}` : '';
   if (!dest!.thread) {
-    // 新建不碰任何已有会话：fork 档也直接新建
+    // 新建不碰任何已有会话，单设阈值；open.ts 给自动新建的会话加"自动新建在项目 X"的路由说明
     const cwd = dest!.project === 'NEW_PROJECT' ? null : dest!.project;
     const where = cwd ? `在项目 ${base2(cwd)} 新开线程` : '不属于任何已有项目，新建目录';
     return { kind: 'new', provider: newProvider(cwd), cwd, confidence: conf, reason: `${where}${why}`, delivery: 'direct', ...common, auto: true, holdReason: null };

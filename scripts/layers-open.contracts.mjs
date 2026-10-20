@@ -9,7 +9,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
 const { open, approvalPrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
-const { routingNote, stripRoutingNote } = await import('../src/layers/routing-note.ts');
+const { routingNote, routingNoteNew, stripRoutingNote } = await import('../src/layers/routing-note.ts');
 
 let pass = 0;
 let fail = 0;
@@ -388,14 +388,21 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('fork 之后下一句的"上一句"去处是分叉出的新会话，不是原会话', seen.previous?.sessionId === 'FORK1', JSON.stringify(seen.previous));
   check('fork 出的新会话进入 ← 历史', readHistory(st.opts.logPath).some((h) => h.sessionId === 'FORK1'));
 
-  // 分叉档的 new：照旧在项目目录新建，正文前加说明头；direct 档的 new 不加
+  // 路由自动新建（有置信度，不论档位）：在项目目录新建，正文前加"自动新建在项目 X"的说明头；人工 --new（置信度 null）不加
   const n1 = world({});
   const proj = fs.mkdtempSync(path.join(root, 'proj-'));
-  await open(TEXT, { ...n1.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.86, reason: 'x', delivery: 'fork' }) });
-  check('fork 档 new：在项目目录 newArgv(说明头+正文)', n1.calls.openView[0].cwd === proj && sameArgv(n1.calls.openView[0].argv, ['claude', note(TEXT, 0.86)]));
+  await open(TEXT, { ...n1.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.86, reason: 'x', delivery: 'direct' }) });
+  const nn = routingNoteNew(TEXT, 0.86, path.basename(proj));
+  check('自动新建：在项目目录 newArgv(新建说明头+正文)', n1.calls.openView[0].cwd === proj && sameArgv(n1.calls.openView[0].argv, ['claude', nn]));
+  check('新建说明头：点明项目目录名与置信度，不含本机路径', nn.startsWith(`[路由说明] 这句话由 Native Task Router 自动新建在项目 ${path.basename(proj)}，置信度 0.86。如果这句话不属于这个项目，请说明原因并停下`) && !nn.includes(root), nn.split('\n')[0]);
+  check('新建说明头：英文', routingNoteNew('add a CSV import', 0.9, 'shop-api').startsWith('[Routing note] Native Task Router automatically started this session in project shop-api (confidence 0.90).'));
+  check('新建说明头可被 stripRoutingNote 去掉（中英文）', stripRoutingNote(nn) === TEXT && stripRoutingNote(routingNoteNew('add a CSV import', 0.9, 'x')) === 'add a CSV import');
   const n2 = world({});
   await open(TEXT, { ...n2.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: 0.97, reason: 'x', delivery: 'direct' }) });
-  check('direct 档 new：正文不加说明头', sameArgv(n2.calls.openView[0].argv, ['claude', TEXT]));
+  check('direct 档自动新建同样加新建说明头', sameArgv(n2.calls.openView[0].argv, ['claude', routingNoteNew(TEXT, 0.97, path.basename(proj))]));
+  const n3 = world({});
+  await open(TEXT, { ...n3.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: null, reason: 'x' }) });
+  check('置信度为 null 的新建（人工语义）不加说明头', sameArgv(n3.calls.openView[0].argv, ['claude', TEXT]));
 
   // direct 档与人工 pick：原样写入，不加说明头
   const d = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });

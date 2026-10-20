@@ -116,7 +116,7 @@ check('版本号已升到 v3.1', ROUTER_V3_VERSION.startsWith('v3.1-'));
 {
   const r = await router(pick([B, 'b1'], 0.6, [[A, 'a2'], [A, 'NEW']])).route(Q, ctx());
   check('低置信 → clarify，候选按模型 ranked：b1、a2、projA 新建', r.kind === 'clarify' && !r.auto && r.options[0].sessionId === 'b1' && r.ranked.map((o) => o.kind === 'new' ? `new:${o.cwd}` : o.sessionId).join() === `b1,a2,new:${A}`);
-  const r2 = await router(pick([A, 'NEW'], 0.6, [[A, 'a1']])).route(Q, ctx());
+  const r2 = await router(pick([A, 'NEW'], 0.5, [[A, 'a1']])).route(Q, ctx());
   check('低置信且首选是项目内新建 → ranked 第一项是新建（入口据此预选新建）', r2.kind === 'clarify' && r2.ranked[0].kind === 'new' && r2.ranked[0].cwd === A);
 }
 {
@@ -137,20 +137,22 @@ check('版本号已升到 v3.1', ROUTER_V3_VERSION.startsWith('v3.1-'));
 
 // ---- 三档闸门：≥direct → direct；[fork, direct) → 续接 fork、NEW 直接新建；<fork → clarify ----
 {
-  check('默认阈值：direct 0.95、fork 0.85', DEFAULT_POLICY_V3.minConfidence === 0.95 && DEFAULT_POLICY_V3.forkConfidence === 0.85);
+  check('默认阈值（dev 重标定）：direct 0.92、fork 0.88、NEW 0.60', DEFAULT_POLICY_V3.minConfidence === 0.92 && DEFAULT_POLICY_V3.forkConfidence === 0.88 && DEFAULT_POLICY_V3.newConfidence === 0.6);
   const at = (conf, env = {}, target = [B, 'b1']) => router(pick(target, conf), env).route(Q, ctx());
   const tier = (r) => (r.kind === 'clarify' ? 'clarify' : r.delivery);
-  for (const [conf, want] of [[1, 'direct'], [0.95, 'direct'], [0.9499, 'fork'], [0.9, 'fork'], [0.85, 'fork'], [0.8499, 'clarify'], [0.5, 'clarify'], [0, 'clarify']]) {
+  for (const [conf, want] of [[1, 'direct'], [0.92, 'direct'], [0.9199, 'fork'], [0.9, 'fork'], [0.88, 'fork'], [0.8799, 'clarify'], [0.6, 'clarify'], [0, 'clarify']]) {
     const r = await at(conf);
     check(`续接 置信度 ${conf} → ${want}`, tier(r) === want && r.auto === (want !== 'clarify'), JSON.stringify({ kind: r.kind, delivery: r.delivery }));
   }
   const rf = await at(0.88);
   check('fork 档续接：kind continue、同一线程、原因写明分叉', rf.kind === 'continue' && rf.sessionId === 'b1' && rf.delivery === 'fork' && rf.reason.includes('分叉'), rf.reason);
   const rn = await at(0.88, {}, [A, 'NEW']);
-  check('fork 档的项目内 NEW → 直接新建（delivery direct，不分叉）', rn.kind === 'new' && rn.cwd === A && rn.delivery === 'direct' && rn.auto && rn.confidence === 0.88);
+  check('fork 档的项目内 NEW → 直接新建（delivery direct，不分叉；路由说明由 open.ts 按置信度加）', rn.kind === 'new' && rn.cwd === A && rn.delivery === 'direct' && rn.auto && rn.confidence === 0.88);
   const rnp = await at(0.9, {}, 'NEW_PROJECT');
   check('fork 档的 NEW_PROJECT → 直接新建', rnp.kind === 'new' && rnp.cwd === null && rnp.delivery === 'direct');
-  check('NEW 低于 fork 阈值 → clarify', tier(await at(0.84, {}, [A, 'NEW'])) === 'clarify');
+  check('NEW 用单独阈值：0.6 → 自动新建，0.5999 → clarify（续接 0.6 则 clarify）', tier(await at(0.6, {}, [A, 'NEW'])) === 'direct' && tier(await at(0.5999, {}, [A, 'NEW'])) === 'clarify' && tier(await at(0.6)) === 'clarify');
+  check('NTR_ROUTER_NEW_CONFIDENCE=0.8：NEW 0.79 → clarify，0.8 → 新建', tier(await at(0.79, { NTR_ROUTER_NEW_CONFIDENCE: '0.8' }, [A, 'NEW'])) === 'clarify' && tier(await at(0.8, { NTR_ROUTER_NEW_CONFIDENCE: '0.8' }, [A, 'NEW'])) === 'direct');
+  check('NTR_ROUTER_NEW_CONFIDENCE 不影响续接档', tier(await at(0.89, { NTR_ROUTER_NEW_CONFIDENCE: '0.99' })) === 'fork');
   const rc = await at(0.6);
   check('clarify 不带 delivery', rc.kind === 'clarify' && rc.delivery === undefined);
 
@@ -158,10 +160,11 @@ check('版本号已升到 v3.1', ROUTER_V3_VERSION.startsWith('v3.1-'));
   check('NTR_ROUTER_MIN_CONFIDENCE=0.9：0.89 → fork', tier(await at(0.89, { NTR_ROUTER_MIN_CONFIDENCE: '0.9' })) === 'fork');
   check('NTR_ROUTER_FORK_CONFIDENCE=0.7：0.75 → fork', tier(await at(0.75, { NTR_ROUTER_FORK_CONFIDENCE: '0.7' })) === 'fork');
   check('NTR_ROUTER_FORK_CONFIDENCE=0.7：0.69 → clarify', tier(await at(0.69, { NTR_ROUTER_FORK_CONFIDENCE: '0.7' })) === 'clarify');
-  check('fork = direct（关掉分叉档）：0.94 → clarify，0.95 → direct', tier(await at(0.94, { NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'clarify' && tier(await at(0.95, { NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'direct');
+  check('fork = direct（关掉分叉档）：0.94 → clarify，0.95 → direct', tier(await at(0.94, { NTR_ROUTER_MIN_CONFIDENCE: '0.95', NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'clarify' && tier(await at(0.95, { NTR_ROUTER_MIN_CONFIDENCE: '0.95', NTR_ROUTER_FORK_CONFIDENCE: '0.95' })) === 'direct');
   check('空串视为未设置', tier(await at(0.9, { NTR_ROUTER_MIN_CONFIDENCE: '', NTR_ROUTER_FORK_CONFIDENCE: ' ' })) === 'fork');
   const throws = (env) => { try { createRouterV3({ complete: pick([B, 'b1'], 0.9), env }); return false; } catch (e) { return e instanceof Error; } };
   check('非法：FORK 高于 MIN → 报错', throws({ NTR_ROUTER_FORK_CONFIDENCE: '0.97' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '0.8' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '0.9', NTR_ROUTER_FORK_CONFIDENCE: '0.91' }));
+  check('非法 NTR_ROUTER_NEW_CONFIDENCE → 报错；合法不报错', throws({ NTR_ROUTER_NEW_CONFIDENCE: '-0.1' }) && throws({ NTR_ROUTER_NEW_CONFIDENCE: '1.2' }) && throws({ NTR_ROUTER_NEW_CONFIDENCE: 'abc' }) && !throws({ NTR_ROUTER_NEW_CONFIDENCE: '0' }) && !throws({ NTR_ROUTER_NEW_CONFIDENCE: '1' }));
   check('非法：不在 0–1 或不是数 → 报错', throws({ NTR_ROUTER_FORK_CONFIDENCE: '-0.1' }) && throws({ NTR_ROUTER_FORK_CONFIDENCE: '1.5' }) && throws({ NTR_ROUTER_FORK_CONFIDENCE: 'abc' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: '2' }) && throws({ NTR_ROUTER_MIN_CONFIDENCE: 'NaN' }));
   check('合法边界不报错：0 与 1', !throws({ NTR_ROUTER_MIN_CONFIDENCE: '1', NTR_ROUTER_FORK_CONFIDENCE: '0' }));
   const f = await router(async () => { throw new Error('不应调用'); }).route('继续', ctx({ previous: { utterance: 'x', provider: 'claude', sessionId: 'c1', minutesAgo: 1 } }));
