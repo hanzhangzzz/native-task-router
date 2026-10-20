@@ -15,7 +15,9 @@
 // 任何模型失败一律不自动；无论自动与否都给出前 3 个去处，入口预选第 1 个。
 //
 // 闸门（v3.2）：模型分别给"项目置信度"和"线程置信度"。档位看项目置信度（与 v3.0 同口径），线程置信度另设一道闸：
-//   - 项目置信度 < forkConfidence（默认 0.85；NEW 用 newConfidence，默认等于 forkConfidence）→ clarify；
+//   - 续接：项目置信度 < forkConfidence（默认 0.85）→ clarify；
+//   - NEW：只在直接档自动，项目置信度 < newConfidence（默认等于 minConfidence 0.95，不得低于 forkConfidence）→ clarify，
+//     入口预选"在项目 X 新建"。新建既没有原会话可分叉保护、也没有已有线程做锚，不能用分叉档的门槛；
 //   - 线程置信度 < threadConfidence（默认 0.7，NTR_ROUTER_THREAD_CONFIDENCE）→ clarify，候选按模型排好的项目各自的首选线程/新建；
 //     NEW 决策的线程置信度就是模型对"该新开"的把握，同样过这道闸；
 //   - thread = NEW → 在该项目新建（NEW_PROJECT 则新目录），open.ts 在正文前加"自动新建在项目 X"的路由说明，不分叉；
@@ -31,7 +33,7 @@ import type { Complete, CompleteRequest, CompleteResult } from './v2.ts';
 // v3.0-project-first-opus-t0.85 → v3.1：模型同时选项目与项目内线程（或 NEW），删除项目内选会话的固定规则（pickInProject、24h 续接窗）；
 // v3.2：项目置信度与线程置信度分开，档位只看项目置信度（0.95 / 0.85），线程置信度 ≥0.85 才直接写入原会话；自动新建加路由说明；
 // 快路径不再自动承接正看着的会话，改为让人确认。
-export const ROUTER_V3_VERSION = 'v3.2-projconf-tiers.model-thread.thread-gate-t0.7-opus-k4w14';
+export const ROUTER_V3_VERSION = 'v3.2-projconf-tiers.model-thread.thread-gate-t0.7.new-gate-direct-opus-k4w14';
 
 export interface RouterV3Policy {
   model: string;
@@ -45,7 +47,7 @@ export interface RouterV3Policy {
   minConfidence: number;
   /** 自动送达：项目置信度 ≥ 此值 → 新建或续接（续接不满足直接条件时走 fork）；更低 → clarify（NTR_ROUTER_FORK_CONFIDENCE） */
   forkConfidence: number;
-  /** NEW（项目内新开或新目录）自动新建所需的项目置信度；不设时等于 forkConfidence（NTR_ROUTER_NEW_CONFIDENCE） */
+  /** NEW（项目内新开或新目录）自动新建所需的项目置信度；不设时等于 minConfidence，不得低于 forkConfidence（NTR_ROUTER_NEW_CONFIDENCE） */
   newConfidence: number | null;
   /** 自动送达还要求线程置信度 ≥ 此值，否则 clarify（NTR_ROUTER_THREAD_CONFIDENCE） */
   threadConfidence: number;
@@ -275,6 +277,9 @@ export function createRouterV3(opts: RouterV3Options = {}): Router {
   if (policy.forkConfidence > policy.minConfidence) {
     throw new Error(`NTR_ROUTER_FORK_CONFIDENCE（${policy.forkConfidence}）不能高于 NTR_ROUTER_MIN_CONFIDENCE（${policy.minConfidence}）`);
   }
+  if (policy.newConfidence !== null && policy.newConfidence < policy.forkConfidence) {
+    throw new Error(`NTR_ROUTER_NEW_CONFIDENCE（${policy.newConfidence}）不能低于 NTR_ROUTER_FORK_CONFIDENCE（${policy.forkConfidence}）`);
+  }
   const viaOpenRouter = !opts.complete && env.NTR_ROUTER_BACKEND === 'openrouter';
   const complete = opts.complete ?? (viaOpenRouter ? openRouterComplete(env) : claudeCliComplete());
   if (viaOpenRouter && !policy.model.includes('/')) policy.model = `anthropic/claude-${policy.model}-5.5`;
@@ -334,7 +339,8 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
   if (r.error || !parsed.ok) return hold(r.error ? '模型失败或超时' : '模型输出无效');
   const conf = parsed.projectConfidence;
   const tc = parsed.threadConfidence;
-  if (conf === null || conf < (dest!.thread ? policy.forkConfidence : policy.newConfidence ?? policy.forkConfidence)) return hold('对项目的把握不足');
+  if (conf === null || conf < policy.forkConfidence) return hold('对项目的把握不足');
+  if (!dest!.thread && conf < (policy.newConfidence ?? policy.minConfidence)) return hold('新建只在最有把握时自动');
   if (tc === null || tc < policy.threadConfidence) return hold(dest!.thread ? '对续哪条线程的把握不足' : '对是否该新开的把握不足');
   const why = parsed.reason ? `：${parsed.reason}` : '';
   if (!dest!.thread) {

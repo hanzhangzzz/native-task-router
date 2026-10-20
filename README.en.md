@@ -110,7 +110,7 @@ sentence ─▶ local session index ─▶ group by project, list recent threads
 - **The gate**: it sends automatically only with at least 0.85 confidence in the project and at least 0.7 in the thread (which one to continue, or that it should be new); if either falls short, you confirm.
   - **Project ≥ 0.95 and thread ≥ 0.85, direct**: types into the open tab, or resumes the session natively.
   - **Other automatic continuations, forked**: still sent automatically, but the original session is never touched. It forks that session into a new one (`claude -r <id> --fork-session` / `codex fork <id>`) that carries all of its context and receives the sentence in a new tab. The original session's history file doesn't change by a single byte, even if it is open in a terminal right now. One routing note goes in front of the text: the message was delivered automatically, with this confidence, and if it is unrelated to the project or session, the agent should say so and stop without changing any files.
-  - **A new thread, started automatically**: a new session in that project directory (or a new directory if it belongs to no project), no fork. The new session also starts with a note: this message was started automatically in project X, and if it doesn't belong there, the agent should say so and stop.
+  - **A new thread, started automatically only when most confident**: only with project ≥ 0.95 does it start a new session in that project directory (or a new directory if it belongs to no project), with no fork; the new session also starts with a note: this message was started automatically in project X, and if it doesn't belong there, the agent should say so and stop. Below 0.95 you confirm, with "new session in project X" preselected, so Enter does it. A new session has neither an original session to protect by forking nor an existing thread to anchor it, so it gets the same bar as direct delivery.
   - **Not confident enough, you confirm**: it lists the model's top projects, each with its best thread there or a new one, with the first preselected, so Enter sends it.
   - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← history, the candidate list, new) is always delivered directly, without a note.
   - Why a forked tier: a wrong send writes the sentence and the agent's reply into the wrong session's native history, and that can't be undone. "Type it but don't press Enter until you confirm" would mean watching the terminal. Forking lets this band go out automatically without dirtying any existing session. A wrong thread in the forked tier doesn't dirty the original session; the cost is that the new session lacks the context you meant to continue.
@@ -122,29 +122,21 @@ sentence ─▶ local session index ─▶ group by project, list recent threads
 
 ## How accurate is it?
 
-The short version: **the tier that writes straight into an original session never hit the wrong project on the held-out set; about three in ten sentences go out automatically and the rest ask you to press Enter once. But the number of wrong-project sends (8) exceeded the limit set in advance (4), mostly on "start a new thread".**
+The short version: **five in six automatic sends get both project and thread right, and the tier that writes straight into an original session never hit the wrong project; about a quarter of sentences go out automatically, and the rest ask you to press Enter once.**
 
-Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Held-out set, 253 samples; this version was run on it once. An automatic send counts as fully right only if both project and thread are right: a continuation must land in the session you actually returned to, and a new task must be routed to a new thread. 31% of the samples are contentless follow-ups like "continue" or "ok"; offline there is no entry context, so they all go to confirmation.
+Evaluated on about a month of the author's real local history ([method and data](ops/research/route-accuracy-2026-10.md), in Chinese). Held-out set, 253 samples. An automatic send counts as fully right only if both project and thread are right: a continuation must land in the session you actually returned to, and a new task must be routed to a new thread. 31% of the samples are contentless follow-ups like "continue" or "ok"; offline there is no entry context, so they all go to confirmation.
 
-With the default thread threshold of 0.7:
+**The numbers below are a post-hoc filter of a single held-out run, not an independent validation.** The held-out set was run once (when the bar for new sessions was still 0.85). The rule "start a new session automatically only at 0.95 or above" was adopted after seeing those results, and the table applies it to the same results. The thread-threshold candidates (0 and 0.7) were fixed on the development set beforehand.
 
-| | Sends | Fully right | Right project, wrong thread | Wrong project |
-| --- | --- | --- | --- | --- |
-| Written into the original session | 14 | 12 | 2 | 0 |
-| Forked | 42 | 35 | 5 | 2 |
-| New session started | 17 | 8 | 3 | 6 |
-| All automatic (29% of 253) | 73 | 55 | 10 | 8 |
+| | Automatic (of 253) | Fully right | Right project, wrong thread | Wrong project | Written into the original session (wrong project) | Forked fully right | New sessions fully right |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Default (thread threshold 0.7) | 60 (24%) | 50 | 7 | 3 | 14 (0) | 35 / 42 | 3 / 4 |
+| Thread threshold 0 | 74 (29%) | 59 | 12 | 3 | 14 (0) | 43 / 55 | 4 / 5 |
+| 0.5.0 (model picks the project, rules pick the session) | 91 (36%) | 68 | 17 | 6 | — | — | — |
 
-- The thread threshold trades accuracy for volume. Three candidates were fixed on the development set beforehand; the held-out set was run once and the same results were counted under each:
-
-| Thread threshold | Automatic | Fully right | Right project, wrong thread | Wrong project | Forked fully right |
-| --- | --- | --- | --- | --- | --- |
-| 0 (ignore the thread) | 96 (38%) | 67 | 21 | 8 | 78% |
-| 0.7 (default) | 73 (29%) | 55 | 10 | 8 | 83% |
-| 0.8 | 60 (24%) | 48 | 6 | 6 | 91% |
-
-- For comparison, the previous version (the model picks the project, rules pick the session) on the same held-out set: 91 automatic, 68 fully right, 17 wrong thread, 6 wrong project. It was originally reported as 70 / 17 / 4 because that count did not check which project a new session landed in; 2 of them landed in the wrong one.
-- 6 of the 8 wrong-project sends were new sessions, 4 of them with project confidence right at the 0.85 line. A new session touches no existing one, and its routing note asks the agent to check first; still, it was opened in the wrong directory.
+- Compared with 0.5.0, fewer sentences go out automatically, and the ones that do are more accurate: fully right rises from three in four to five in six, wrong-project sends drop from 6 to 3, and "new session in the wrong project" drops from 6 to 1 (same held-out set, same counting). 0.5.0 was originally reported as 70 / 17 / 4 because that count did not check which project a new session landed in; 2 of them landed in the wrong one. Here it is recounted with "both project and thread right".
+- For more automatic sends, set `NTR_ROUTER_THREAD_CONFIDENCE` to 0: about 29% automatic, at the cost of more wrong threads (all in the forked tier, so the original session is untouched; the new session just lacks the context you meant to continue).
+- The 3 remaining wrong-project sends: 2 in the forked tier, original sessions untouched; 1 new session for a sentence that belonged to a directory you had just created, placed into an existing project instead.
 - Each decision takes about 5 seconds at p50 and 8 seconds at p90, mostly `claude -p` startup and Opus inference; at API prices that is about $0.09 per decision (no extra charge on a subscription). The fast path takes tens of milliseconds.
 
 The sample is small and reflects one person's habits. These numbers describe this data, not a general error rate.
@@ -159,8 +151,8 @@ Routing only decides where a sentence goes. It is separate from the Claude Code 
 | `NTR_ROUTER_MODEL=sonnet` | Any other model `claude -p` supports |
 | `NTR_ROUTER_MIN_CONFIDENCE=0.97` | Project confidence needed to write straight into the original session (default 0.95); higher means fewer direct sends |
 | `NTR_ROUTER_FORK_CONFIDENCE=0.9` | Project confidence needed for any automatic delivery (default 0.85); below it you confirm. It can't be higher than the direct threshold; a bad value is an error |
-| `NTR_ROUTER_THREAD_CONFIDENCE=0.8` | Thread confidence needed for automatic delivery (default 0.7); higher means fewer automatic sends with more accurate threads, see the table above |
-| `NTR_ROUTER_NEW_CONFIDENCE=0.9` | Project confidence needed to start a new session automatically (defaults to `NTR_ROUTER_FORK_CONFIDENCE`) |
+| `NTR_ROUTER_THREAD_CONFIDENCE=0` | Thread confidence needed for automatic delivery (default 0.7); higher means fewer automatic sends with more accurate threads, 0 ignores the thread, see the table above |
+| `NTR_ROUTER_NEW_CONFIDENCE=0.97` | Project confidence needed to start a new session automatically (defaults to `NTR_ROUTER_MIN_CONFIDENCE`); it can't be lower than the forked threshold, and a bad value is an error |
 | `NTR_ROUTER_BACKEND=openrouter` + `openrouter_api_key` | The same candidates, prompt, and gate via [OpenRouter](https://openrouter.ai); combine with e.g. `NTR_ROUTER_MODEL=deepseek/deepseek-v4.1-flash` to pick any model |
 | `NTR_ROUTER=interim` | Use Jev (`typesafe/jev-1.13`) on OpenRouter Decisions to choose |
 

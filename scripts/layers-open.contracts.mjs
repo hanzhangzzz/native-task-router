@@ -408,6 +408,24 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   await open(TEXT, { ...n3.opts, router: route({ kind: 'new', provider: 'claude', cwd: proj, confidence: null, reason: 'x' }) });
   check('置信度为 null 的新建（人工语义）不加说明头', sameArgv(n3.calls.openView[0].argv, ['claude', TEXT]));
 
+  // 端到端：生产 Router v3 + open()。模型判 NEW、项目 0.96、线程 0.75 → 在项目目录自动新建，正文带新建说明；项目 0.90 → 确认、预选项目内新建
+  {
+    const { createRouterV3 } = await import('../src/layers/router/v3.ts');
+    const projE = fs.mkdtempSync(path.join(root, 'proj-e2e-'));
+    const now = Date.parse('2026-10-10T01:00:00Z');
+    const fake = (pc) => async (req) => {
+      const u = req.messages[1].content; const at = u.indexOf(`/${path.basename(projE)} ·`); const p = u.slice(u.lastIndexOf('[P', at) + 1, u.indexOf(']', u.lastIndexOf('[P', at)));
+      return { text: JSON.stringify({ project: p, projectConfidence: pc, thread: 'NEW', threadConfidence: 0.75, reason: 'x', top3: [`${p}/NEW`] }), costUsd: null };
+    };
+    const longText = '给这个项目加一个把报表导出成 CSV 文件的命令行入口';
+    const e1 = world({ cards: [card('claude', 'E1', projE, { updatedAt: '2026-10-10T00:30:00Z' })] });
+    const o1 = await open(longText, { ...e1.opts, router: createRouterV3({ complete: fake(0.96), env: {}, now: () => now }) });
+    check('端到端：NEW 0.96 + 线程 0.75 → 在项目目录自动新建，正文带新建说明', o1.action === 'opened' && e1.calls.openView[0]?.cwd === projE && sameArgv(e1.calls.openView[0].argv, ['claude', routingNoteNew(longText, 0.96, path.basename(projE))]), JSON.stringify(o1));
+    const e2 = world({ cards: [card('claude', 'E1', projE, { updatedAt: '2026-10-10T00:30:00Z' })] });
+    const o2 = await open(longText, { ...e2.opts, router: createRouterV3({ complete: fake(0.9), env: {}, now: () => now }) });
+    check('端到端：NEW 0.90 → 确认，预选在该项目新建（suggestNew 带目录），无副作用', o2.action === 'clarify' && o2.suggestNew?.cwd === projE && o2.ranked?.[0]?.kind === 'new' && e2.calls.openView.length === 0, JSON.stringify(o2));
+  }
+
   // direct 档与人工 pick：原样写入，不加说明头
   const d = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
   const rd = await open(TEXT, { ...d.opts, router: route({ kind: 'continue', provider: 'claude', sessionId: 'S1', confidence: 0.97, reason: 'x', delivery: 'direct' }) });
