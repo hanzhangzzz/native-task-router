@@ -191,6 +191,8 @@ NTR_LIVE_ITERM=1 npm run open:live       # 真实 iTerm 端到端：会在你的
 NTR_LIVE_TERMINAL=1 npm run terminal:live  # 真实 Terminal 验收：只在自己新开的 Terminal 窗口里测，收尾逐个关闭，默认不运行
 ```
 
+发版顺序：发 GitHub Release → `scripts/release-cask.sh <版本>` 同步 Homebrew cask → `scripts/verify-install.sh <版本>` 按陌生人的路径验证安装。后者在临时目录里用全新的 Homebrew 从 Release 重新下载安装，核对哈希、版本、签名、quarantine 与 Gatekeeper 评估，再用示例历史跑一次只判断不送达的路由；不碰本机 Homebrew、已装的 app 和你的会话数据，结束后全部删除。它覆盖不了"全新 macOS 上第一次打开"这一步。
+
 分层代码在 [`src/layers/`](src/layers)：`providers/`（谁持有会话：claude、codex）、`surfaces/`（在哪展示：iterm、terminal，multi 负责分发）、`router/`（判断去处）、`open.ts`（编排）；入口在 [`entry/`](entry)。各层之间的合同见 [`src/layers/types.ts`](src/layers/types.ts)。
 
 ## 许可

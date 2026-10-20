@@ -183,6 +183,8 @@ NTR_LIVE_ITERM=1 npm run open:live       # real iTerm end-to-end: opens a test w
 NTR_LIVE_TERMINAL=1 npm run terminal:live  # real Terminal acceptance: tests only in Terminal windows it opens, closes them one by one; off by default
 ```
 
+Release order: publish the GitHub Release → `scripts/release-cask.sh <version>` to sync the Homebrew cask → `scripts/verify-install.sh <version>` to check the install path a stranger would take. It installs with a fresh Homebrew in a temporary directory, downloads from the Release again, checks the hash, version, signature, quarantine flag and Gatekeeper assessment, then runs one decide-only route against sample history. It doesn't touch your Homebrew, your installed app or your session data, and deletes everything when done. It can't cover the first launch on a brand-new macOS.
+
 The layered code is in [`src/layers/`](src/layers): `providers/` (who owns a session: claude, codex), `surfaces/` (where it is shown: iterm, terminal, with multi dispatching between them), `router/` (deciding the destination), and `open.ts` (orchestration). The entry is in [`entry/`](entry). The contract between layers is [`src/layers/types.ts`](src/layers/types.ts).
 
 ## License

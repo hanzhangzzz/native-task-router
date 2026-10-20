@@ -3,6 +3,7 @@
 # 改写 tap 检出里的 version / sha256，以发布身份提交并推送。无变化时不提交（可重复执行）。
 # 用法: scripts/release-cask.sh <version>     例: scripts/release-cask.sh 0.4.0
 # 前置: 已 `brew tap hanzhangzzz/tap`，gh 已登录且对 tap 仓库有写权限。
+# 之后: 跑 `scripts/verify-install.sh <version>`，在隔离的 Homebrew 里按陌生人路径验证这次发布。
 set -euo pipefail
 
 VERSION="${1:-}"; VERSION="${VERSION#v}"
@@ -31,7 +32,7 @@ grep -q "^  version \"${VERSION}\"$" "${CASK}" && grep -q "^  sha256 \"${SHA}\"$
   || { echo "改写 cask 失败，检查 ${CASK} 的 version/sha256 行格式" >&2; git -C "${TAP}" checkout -q -- "${CASK}"; exit 1; }
 
 if git -C "${TAP}" diff --quiet; then
-  echo "cask 已是 ${VERSION}（${SHA}），无需提交"
+  echo "cask 已是 ${VERSION}（${SHA}），无需提交；下一步: scripts/verify-install.sh ${VERSION}"
   exit 0
 fi
 
@@ -39,4 +40,4 @@ git -C "${TAP}" add Casks/native-task-router.rb
 git -C "${TAP}" -c user.name=huajuan404 -c user.email=258429709+huajuan404@users.noreply.github.com \
   commit -q -m "chore: native-task-router ${VERSION}"
 git -C "${TAP}" push -q origin main
-echo "cask 已更新到 ${VERSION}：$(git -C "${TAP}" rev-parse --short HEAD)"
+echo "cask 已更新到 ${VERSION}：$(git -C "${TAP}" rev-parse --short HEAD)；下一步: scripts/verify-install.sh ${VERSION}"
