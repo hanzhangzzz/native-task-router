@@ -246,6 +246,10 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('clarify 透传原因；Router 首选新建时给出 suggestNew（入口预选新建）', rs.action === 'clarify' && rs.reason === '置信度低于阈值' && rs.suggestNew?.provider === 'codex' && rs.suggestNew?.cwd === root);
   const rt = await open(TEXT, { ...w.opts, router: route({ kind: 'clarify', options: opts, reason: 'x', ranked: [{ kind: 'session', ...opts[0] }] }) });
   check('Router 首选是会话时 suggestNew 为 null（入口预选第 1 个会话）', rt.action === 'clarify' && rt.suggestNew === null);
+  const proj2 = path.join(root, 'proj-x');
+  const ru = await open(TEXT, { ...w.opts, router: route({ kind: 'clarify', options: opts, reason: 'x', ranked: [{ kind: 'session', ...opts[0] }, { kind: 'new', provider: 'codex', cwd: proj2, probability: null }, { kind: 'session', ...opts[1] }] }) });
+  check('clarify 按 Router 顺序透传全部候选：排第二的项目内新建保留目录', ru.action === 'clarify' && JSON.stringify(ru.ranked) === JSON.stringify([{ kind: 'session', provider: 'claude', sessionId: 'A' }, { kind: 'new', provider: 'codex', cwd: proj2 }, { kind: 'session', provider: 'codex', sessionId: 'B' }]) && ru.suggestNew === null, JSON.stringify(ru.ranked));
+  check('Router 没给 ranked 时 clarify 不带 ranked（入口退回 options + suggestNew）', r.ranked === undefined);
   const w2 = world({ cards: [card('claude', 'A', root)], liveSeq: [[live('claude', 'A', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
   const r2 = await open(TEXT, { ...w2.opts, router: { route: async () => { throw new Error('不应路由'); } }, pick: { provider: 'claude', sessionId: 'A' } });
   check('S6 pick 跳过路由并送达所选', r2.action === 'wrote' && w2.calls.write[0].v === 'V1');

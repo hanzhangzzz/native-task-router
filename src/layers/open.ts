@@ -262,9 +262,17 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
 
     if (decision.kind === 'clarify') {
       // Router v2 附带按相关度排好的 ranked（可含"新建"）；第一项是新建时把它作为预选
-      const first = (decision as { ranked?: Array<{ kind: string; provider?: ProviderId; cwd?: string | null }> }).ranked?.[0];
+      const rankedIn = (decision as { ranked?: Array<{ kind: string; provider?: ProviderId; sessionId?: string; cwd?: string | null }> }).ranked;
+      const first = rankedIn?.[0];
       const suggestNew = first?.kind === 'new' && first.provider ? { provider: first.provider, cwd: first.cwd ?? null } : null;
-      return finish({ action: 'clarify', options: decision.options, reason: decision.reason, suggestNew });
+      // 全部候选按 Router 的顺序透传：排第二及以后的"项目内新建"也带着目录，不退化成新目录
+      type Ranked = NonNullable<Extract<OpenOutcome, { action: 'clarify' }>['ranked']>;
+      const ranked: Ranked = [];
+      for (const o of rankedIn ?? []) {
+        if (o.kind === 'new' && o.provider) ranked.push({ kind: 'new', provider: o.provider, cwd: o.cwd ?? null });
+        else if (o.kind === 'session' && o.provider && o.sessionId) ranked.push({ kind: 'session', provider: o.provider, sessionId: o.sessionId });
+      }
+      return finish({ action: 'clarify', options: decision.options, reason: decision.reason, suggestNew, ...(ranked.length ? { ranked } : {}) });
     }
 
     // ---- new ----

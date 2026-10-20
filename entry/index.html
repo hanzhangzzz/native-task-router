@@ -164,7 +164,13 @@
     if (r.action === 'clarify') {
       const sessions = r.options.map((o) => ({ kind: 'session', ...o }));
       const fallbackNew = { kind: 'new', provider: (r.suggestNew && r.suggestNew.provider) || 'claude', cwd: r.suggestNew ? r.suggestNew.cwd : null };
-      items = r.suggestNew ? [fallbackNew, ...sessions] : [...sessions, fallbackNew];
+      if (r.ranked && r.ranked.length) {
+        // 按 Router 的顺序列出（含各项目内的"新建"及其目录）；会话项沿用 options 里带卡片的那份
+        const byKey = new Map(sessions.map((x) => [x.provider + ':' + x.sessionId, x]));
+        items = r.ranked.map((o) => (o.kind === 'new' ? { kind: 'new', provider: o.provider, cwd: o.cwd || null } : byKey.get(o.provider + ':' + o.sessionId))).filter(Boolean);
+        for (const x of sessions) if (!items.includes(x)) items.push(x);
+        if (!items.some((x) => x.kind === 'new')) items.push(fallbackNew);
+      } else items = r.suggestNew ? [fallbackNew, ...sessions] : [...sessions, fallbackNew];
       sel = 0; mode = 'choose';
       say(r.reason ? S.notSent(r.reason) : S.unsure);
       render();

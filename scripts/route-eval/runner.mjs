@@ -84,7 +84,7 @@ export function rowForDisk(r) {
       kind: d.kind, chosen: d.kind === 'continue' ? `${d.provider}:${d.sessionId}` : null, confidence: d.confidence ?? null,
       options: d.options?.map((o) => ({ id: `${o.provider}:${o.sessionId}`, p: o.probability })) ?? null,
       reason: d.reason ?? null, error: d.error ?? null, model: d.model ?? null,
-      delivery: d.delivery ?? null, via: d.via ?? null, thread: d.thread ?? null, modelReason: d.modelReason ?? null, modelConfidence: d.modelConfidence ?? null,
+      delivery: d.delivery ?? null, via: d.via ?? null, thread: d.thread ?? null, modelReason: d.modelReason ?? null, modelConfidence: d.modelConfidence ?? null, threadConfidence: d.threadConfidence ?? null,
       ranked: d.ranked?.map((o) => (o.kind === 'new' ? { new: true, cwd: o.cwd ?? null, p: o.probability } : { id: `${o.provider}:${o.sessionId}`, p: o.probability })) ?? null,
     },
     chosenCwd: r.chosenCwd, targetCwd: r.targetCwd, targetProjectInPool: r.targetProjectInPool,

@@ -1,4 +1,4 @@
-// Router v3.1 会话层指标：自动路由里"项目对且线程对 / 项目对线程错 / 项目错"，按三档（≥0.95 direct、0.85–0.95 fork）拆分。
+// Router v3.x 会话层指标：自动路由里"项目对且线程对 / 项目对线程错 / 项目错"，按直接续接 / 分叉续接 / 新建拆分。
 // 项目真值：续接 = 目标会话的目录；新建 = 样本目录（该目录当时不在候选池里 → 真值为 NEW_PROJECT）。
 // 线程真值：续接 → 同一会话 id；新建 → 决策为 NEW（项目内新开或新目录）。
 // 用法：node scripts/route-eval/lab/thread-metrics.mjs <results.jsonl> --set dev|heldout [--out <file.json>]
@@ -17,7 +17,8 @@ const base2 = (cwd) => (cwd ?? '').split('/').filter(Boolean).slice(-2).join('/'
 const q = (xs, p) => { const a = xs.filter((x) => typeof x === 'number').sort((x, y) => x - y); return a.length ? a[Math.min(a.length - 1, Math.ceil(p * a.length) - 1)] : null; };
 
 const out = { file, set: SET, n: rows.length, errors: 0, auto: 0, tiers: {}, all: { ok: 0, threadWrong: 0, projWrong: 0 }, threadWrongTypes: {}, projWrongTypes: {}, clarify: { n: 0, contN: 0, top1: 0, top3: 0, newFirst: 0, newN: 0 }, latency: {}, cost: {} };
-const tier = (c) => (c >= 0.95 ? 'direct' : 'fork');
+// 档位：续接按实际投递方式（direct / fork；旧行没有 delivery 时按置信度 0.95 推断），新建单列
+const tierOf = (d) => (d.kind === 'new' ? 'new' : d.delivery ?? (d.confidence >= 0.95 ? 'direct' : 'fork'));
 const lat = [], costs = [];
 const details = [];
 for (const r of rows) {
@@ -46,7 +47,7 @@ for (const r of rows) {
   const projOK = decProject === truthProject;
   const threadOK = s.label === 'NEW' ? d.kind === 'new' : d.kind === 'continue' && d.chosen === r.label;
   const cls = projOK && threadOK ? 'ok' : projOK ? 'threadWrong' : 'projWrong';
-  const tr = tier(d.confidence);
+  const tr = tierOf(d);
   out.tiers[tr] ??= { auto: 0, ok: 0, threadWrong: 0, projWrong: 0, continueDecisions: 0, newDecisions: 0, conf: [] };
   const T = out.tiers[tr];
   T.auto++; T[cls]++; T[d.kind === 'continue' ? 'continueDecisions' : 'newDecisions']++; T.conf.push(d.confidence);
