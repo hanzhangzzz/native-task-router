@@ -1,52 +1,44 @@
-// 收音端：听到唤醒词「小卡拉米」→ 叮一声 → 录下接着说的一句话 → 本地转文字 → 交给 Native Task Router 路由 → 把结果读出来。
-// 全部离线（sherpa-onnx）。先 npm run models 把模型下到 ~/.ntr/cache/models；Native Task Router 要在运行（它提供 127.0.0.1 语音入口）。
+// 收音端：听到「小卡拉米」→ 叮一声 → 录下要派的活（也可以一口气连着说）→ 本地转文字 → 交给 Native Task Router 路由 → 把结果读出来。
+// 全部离线（sherpa-onnx）：人声检测切出每一句，SenseVoice 转文字，再按拼音模糊匹配唤醒词（wake.mjs）。
+// 不用专门的唤醒词模型：真人口语里「小卡拉米」常被说成「小卡了你」，小模型逐音素比对认不出，大模型转写加近音匹配认得出。
+// 先 npm run models 把模型下到 ~/.ntr/cache/models；Native Task Router 要在运行（它提供 127.0.0.1 语音入口）。
 //   npm start                     麦克风：ffmpeg 采集系统默认输入，NTR_MIC 换设备（macOS 填 ffmpeg -f avfoundation -list_devices true -i "" 列出的序号）
 //   npm start -- --wav x.wav      用 16kHz 单声道录音代替麦克风（排障、验收）
-//   NTR_WAKE_THRESHOLD=0.15       唤醒灵敏度（越小越容易唤醒，也越容易误唤醒；默认 0.25）
+//   NTR_VOICE_DEBUG=1             打印每一句听到的话（调试唤醒用；默认只打印唤醒之后的话）
 import sherpa from 'sherpa-onnx-node';
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { matchWake } from './wake.mjs';
 
 const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
 const MODELS = path.join(NTR_HOME, 'cache', 'models');
 const ENDPOINT = `http://127.0.0.1:${process.env.NTR_VOICE_PORT || 47615}/utterance`;
+const DEBUG = process.env.NTR_VOICE_DEBUG === '1';
 const RATE = 16000;
 const WIN = 512; // silero VAD 每次吃 512 个采样
-const NO_SPEECH_SEC = 6; // 唤醒后这么久没开口就放弃
+const WAIT_SEC = 8; // 唤醒后这么久没开口就放弃
+// 自己切句：VAD 只判断"此刻有没有人在说话"。它自带的分段会切掉开头的字、把一句拆碎（真人录音里「小卡了你」被切成「就卡嘢」）
+const PRE = 0.6 * RATE; // 从检测到说话前 0.6 秒截起
+const HANG = 0.8 * RATE; // 停顿超过 0.8 秒算一句结束
+const MAX_UTT = 20 * RATE;
+const MIN_SPEECH = 0.3 * RATE; // 说话不到 0.3 秒的当作杂音
 
-const KWS = path.join(MODELS, 'sherpa-onnx-kws-zipformer-wenetspeech-3.3M-2024-01-01');
 const ASR = path.join(MODELS, 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09');
-if (!fs.existsSync(KWS) || !fs.existsSync(ASR) || !fs.existsSync(path.join(MODELS, 'silero_vad.onnx'))) {
+if (!fs.existsSync(ASR) || !fs.existsSync(path.join(MODELS, 'silero_vad.onnx'))) {
   console.error(`缺模型：先运行 npm run models（下载到 ${MODELS}）`);
   process.exit(1);
 }
-// 唤醒词按模型的拼音单元写：声母 + 带调韵母
-const keywordsFile = path.join(MODELS, 'ntr-wake-keywords.txt');
-fs.writeFileSync(keywordsFile, 'x iǎo k ǎ l ā m ǐ @小卡拉米\n');
-
-const kws = new sherpa.KeywordSpotter({
-  featConfig: { sampleRate: RATE, featureDim: 80 },
-  modelConfig: {
-    transducer: {
-      encoder: path.join(KWS, 'encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx'),
-      decoder: path.join(KWS, 'decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx'),
-      joiner: path.join(KWS, 'joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx'),
-    },
-    tokens: path.join(KWS, 'tokens.txt'), numThreads: 1, provider: 'cpu',
-  },
-  keywordsFile,
-  keywordsThreshold: Number(process.env.NTR_WAKE_THRESHOLD) || 0.25,
-});
 const vad = new sherpa.Vad({
-  sileroVad: { model: path.join(MODELS, 'silero_vad.onnx'), threshold: 0.5, minSilenceDuration: 0.8, minSpeechDuration: 0.25, windowSize: WIN, maxSpeechDuration: 20 },
+  sileroVad: { model: path.join(MODELS, 'silero_vad.onnx'), threshold: 0.3, minSilenceDuration: 0.25, minSpeechDuration: 0.2, windowSize: WIN, maxSpeechDuration: 20 },
   sampleRate: RATE, numThreads: 1, provider: 'cpu',
 }, 30);
 const asr = new sherpa.OfflineRecognizer({
   featConfig: { sampleRate: RATE, featureDim: 80 },
   modelConfig: {
-    senseVoice: { model: path.join(ASR, 'model.int8.onnx'), language: 'auto', useInverseTextNormalization: 1 },
+    // 固定普通话：自动判断语种时短句常被当成粤语（「就卡嘢」）
+    senseVoice: { model: path.join(ASR, 'model.int8.onnx'), language: 'zh', useInverseTextNormalization: 1 },
     tokens: path.join(ASR, 'tokens.txt'), numThreads: 2, provider: 'cpu',
   },
 });
@@ -57,79 +49,97 @@ const chime = () => process.platform === 'darwin' && void run('afplay', ['/Syste
 // 播报期间不收音（state=busy），免得把自己的声音当成下一句
 const speak = (s) => { log(`播报：${s}`); return process.platform === 'darwin' ? run('say', [s.slice(0, 120)]) : Promise.resolve(); };
 
-// idle 等唤醒 | listen 录这一句 | busy 转写、路由、播报（期间丢弃音频）
+// idle 等唤醒 | listen 已唤醒，等要派的活 | busy 转写、路由、播报（期间丢弃音频，免得把自己的播报当成下一句）
 let state = 'idle';
-let kwsStream = kws.createStream();
-// 唤醒词要说完半秒左右才报出来：等待唤醒时留着最近 3 秒，唤醒后从唤醒词结尾接着录，一口气连着说的开头不丢
-let recent = [];
-let recentLen = 0;
-let kwsFed = 0;
-let pending = new Float32Array(0);
-let heard = 0;
 let job = null;
+// 最近 30 秒原始音频的环形缓冲；fed 是送进来的采样总数（绝对位置）
+const ring = new Float32Array(30 * RATE);
+let fed = 0;
+let pending = new Float32Array(0);
+// 麦克风电平常常很低（系统输入音量低、离得远），VAD 吃放大后的音频；增益按上一句的峰值自动调
+let gain = 16;
+let uttStart = -1, lastSpeech = 0, speechLen = 0;
+let waited = 0; // listen 状态下已过去的采样数
+
+const ringRead = (from, to) => {
+  const out = new Float32Array(to - from);
+  for (let k = from; k < to; k++) out[k - from] = ring[k % ring.length];
+  return out;
+};
+const resetUtt = () => { uttStart = -1; speechLen = 0; };
 
 function onAudio(samples) {
   if (state === 'busy') return;
-  if (state === 'idle') {
-    kwsStream.acceptWaveform({ sampleRate: RATE, samples });
-    kwsFed += samples.length;
-    recent.push(samples); recentLen += samples.length;
-    while (recentLen - recent[0].length > 3 * RATE) recentLen -= recent.shift().length;
-    while (kws.isReady(kwsStream)) {
-      kws.decode(kwsStream);
-      const r = kws.getResult(kwsStream);
-      if (r.keyword) return wake(r);
-    }
-    return;
-  }
-  heard += samples.length;
+  for (let k = 0; k < samples.length; k++) ring[(fed + k) % ring.length] = samples[k];
+  const base = fed - pending.length;
+  fed += samples.length;
   const buf = new Float32Array(pending.length + samples.length);
   buf.set(pending); buf.set(samples, pending.length);
   let i = 0;
-  for (; i + WIN <= buf.length; i += WIN) vad.acceptWaveform(buf.subarray(i, i + WIN));
+  for (; i + WIN <= buf.length; i += WIN) {
+    vad.acceptWaveform(buf.subarray(i, i + WIN).map((x) => Math.max(-1, Math.min(1, x * gain))));
+    while (!vad.isEmpty()) vad.pop(); // 不用它的分段
+    const pos = base + i + WIN;
+    if (vad.isDetected()) {
+      if (uttStart < 0) uttStart = Math.max(pos - WIN - PRE, fed - ring.length, 0);
+      lastSpeech = pos; speechLen += WIN;
+    }
+    if (uttStart >= 0 && (pos - lastSpeech > HANG || pos - uttStart > MAX_UTT)) {
+      const seg = ringRead(uttStart, Math.min(lastSpeech + HANG / 2, fed));
+      const real = speechLen >= MIN_SPEECH;
+      resetUtt();
+      if (real) { pending = new Float32Array(0); job = handle(seg).finally(() => { job = null; }); return; }
+    }
+  }
   pending = buf.slice(i);
-  if (!vad.isEmpty()) {
-    const seg = Float32Array.from(vad.front(false).samples);
-    vad.clear();
-    job = handle(seg).finally(() => { job = null; });
-  } else if (!vad.isDetected() && heard > NO_SPEECH_SEC * RATE) {
-    job = finish(speak('没听到，下次再叫我'));
+  if (state === 'listen' && uttStart < 0) {
+    waited += samples.length;
+    if (waited > WAIT_SEC * RATE) job = finish(speak('没听到，下次再叫我'));
   }
 }
 
-function wake(r) {
-  log('唤醒');
-  kws.reset(kwsStream);
-  state = 'listen'; vad.reset(); pending = new Float32Array(0); heard = 0;
-  chime();
-  // 时间戳是每个拼音单元的起点，最后一个韵母再往后 0.25 秒算唤醒词结束
-  const end = Math.round((r.start_time + r.timestamps.at(-1) + 0.25) * RATE);
-  const tail = Math.max(0, Math.min(recentLen, kwsFed - end));
-  const buf = new Float32Array(recentLen);
-  let o = 0;
-  for (const c of recent) { buf.set(c, o); o += c.length; }
-  recent = []; recentLen = 0;
-  if (tail) onAudio(buf.subarray(buf.length - tail));
+function transcribe(seg) {
+  // 下一句的 VAD 增益按这句的峰值调（放大到 0.5，最多 32 倍）
+  let peak = 0;
+  for (const x of seg) peak = Math.max(peak, Math.abs(x));
+  if (peak > 0) gain = Math.min(32, Math.max(1, 0.5 / peak));
+  // 前后各补 1 秒静音：短短一句「小卡拉米」不补时更容易听错（真人录音实测）
+  const padded = new Float32Array(seg.length + 2 * RATE);
+  padded.set(seg, RATE);
+  const st = asr.createStream();
+  st.acceptWaveform({ sampleRate: RATE, samples: padded });
+  asr.decode(st);
+  return asr.getResult(st).text.trim();
+}
+
+async function handle(seg) {
+  const listening = state === 'listen';
+  state = 'busy';
+  const text = transcribe(seg);
+  if (DEBUG) log(`（听到）${text}`);
+  const wake = matchWake(text);
+  const zhLen = text.replace(/[^一-龥]/g, '').length;
+  // 已唤醒时又叫了一遍但没叫准（「小康你」），按再叫一次处理，不当成要派的活
+  if (!wake && listening && zhLen <= 6 && matchWake(text, 1.75)) { state = 'listen'; waited = 0; return; }
+  const task = wake ? wake.rest : listening ? text : '';
+  if (wake) { log(`唤醒（差异 ${wake.cost}）`); chime(); }
+  if (!wake && !listening) return finish();
+  // 唤醒词后面的话太短（"嗯""好"之类）当作没说，接着等
+  if (task.replace(/[^一-龥a-zA-Z0-9]/g, '').length < 2) {
+    if (!wake) return finish(speak('没听清，再说一次'));
+    state = 'listen'; waited = 0;
+    return;
+  }
+  log(`听到：${task}`);
+  return finish(route(task).then(speak));
 }
 
 async function finish(p) {
   state = 'busy';
   await p;
-  kwsStream = kws.createStream(); kwsFed = 0;
+  vad.reset(); pending = new Float32Array(0); resetUtt();
   state = 'idle';
   job = null;
-}
-
-async function handle(seg) {
-  state = 'busy';
-  const st = asr.createStream();
-  st.acceptWaveform({ sampleRate: RATE, samples: seg });
-  asr.decode(st);
-  // 一口气连着唤醒词说时，转写会带上唤醒词
-  const text = asr.getResult(st).text.trim().replace(/^小卡拉米[，,。.\s]*/, '');
-  if (!text) return finish(speak('没听清，再说一次'));
-  log(`听到：${text}`);
-  return finish(route(text).then(speak));
 }
 
 async function route(text) {
@@ -154,7 +164,7 @@ if (wavAt > 0) {
   const all = new Float32Array(w.samples.length + 2 * RATE);
   all.set(w.samples);
   for (let i = 0; i < all.length; i += RATE / 10) { onAudio(all.subarray(i, i + RATE / 10)); if (job) await job; }
-  if (state === 'listen') log('录音结束时还在等这一句');
+  if (state === 'listen') log('录音结束时还在等要派的活');
 } else {
   const input = process.platform === 'darwin'
     ? ['-f', 'avfoundation', '-i', `:${process.env.NTR_MIC || 'default'}`]
@@ -171,5 +181,5 @@ if (wavAt > 0) {
     rest = b.subarray(n * 2);
     onAudio(f);
   });
-  log('在听：说「小卡拉米」唤醒');
+  log('在听：说「小卡拉米」唤醒，可以接着一口气说要派的活');
 }
