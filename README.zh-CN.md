@@ -48,7 +48,7 @@ brew trust hanzhangzzz/tap                              # 第三方 tap 要先�
 brew install --cask hanzhangzzz/tap/native-task-router
 ```
 
-装好后从第 2 步继续。以后用 `brew upgrade --cask native-task-router` 升级。
+装好后从第 2 步继续。0.7.0 起有新版本时菜单栏图标旁会出现 ↑，点「更新到 x.y.z 并重启」原地升级（下载的包须与 Release 公布的 SHA-256 一致、且是同一张签名证书）；也可以用 `brew upgrade --cask native-task-router`。
 
 **或者手动下载 dmg**：
 
