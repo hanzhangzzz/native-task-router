@@ -4,6 +4,7 @@
 // 先 npm run models 把模型下到 ~/.ntr/cache/models；Native Task Router 要在运行（它提供 127.0.0.1 语音入口）。
 //   npm start                     麦克风：ffmpeg 采集系统默认输入，NTR_MIC 换设备（macOS 填 ffmpeg -f avfoundation -list_devices true -i "" 列出的序号）
 //   npm start -- --wav x.wav      用 16kHz 单声道录音代替麦克风（排障、验收）
+//   --stdin                       从标准输入读 16kHz 单声道 s16le（App 菜单栏「语音唤醒」用这个）
 //   NTR_VOICE_DEBUG=1             打印每一句听到的话（调试唤醒用；默认只打印唤醒之后的话）
 import sherpa from 'sherpa-onnx-node';
 import { execFile, spawn } from 'node:child_process';
@@ -159,21 +160,27 @@ async function route(text) {
 const wavAt = process.argv.indexOf('--wav');
 if (wavAt > 0) {
   // 录音文件：按 100ms 一块喂，末尾补 2 秒静音让最后一句收尾；一句处理完再继续喂
-  const w = sherpa.readWave(process.argv[wavAt + 1]);
+  const w = sherpa.readWave(process.argv[wavAt + 1], false); // false：复制一份；Electron 的内存隔离不允许外部缓冲区
   if (w.sampleRate !== RATE) { console.error(`录音要 ${RATE}Hz，这个是 ${w.sampleRate}Hz`); process.exit(1); }
   const all = new Float32Array(w.samples.length + 2 * RATE);
   all.set(w.samples);
   for (let i = 0; i < all.length; i += RATE / 10) { onAudio(all.subarray(i, i + RATE / 10)); if (job) await job; }
   if (state === 'listen') log('录音结束时还在等要派的活');
 } else {
-  const input = process.platform === 'darwin'
-    ? ['-f', 'avfoundation', '-i', `:${process.env.NTR_MIC || 'default'}`]
-    : ['-f', 'alsa', '-i', process.env.NTR_MIC || 'default'];
-  const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...input, '-ac', '1', '-ar', String(RATE), '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'inherit'] });
-  ff.on('error', () => { console.error('需要 ffmpeg 采集麦克风（macOS：brew install ffmpeg）'); process.exit(1); });
-  ff.on('exit', (code) => { console.error(`麦克风采集退出（${code}）。macOS 要在「系统设置 → 隐私与安全性 → 麦克风」允许运行本程序的终端`); process.exit(1); });
+  // 16kHz 单声道 s16le 流：默认 ffmpeg 采集麦克风；--stdin 时由 Native Task Router 菜单栏「语音唤醒」从 App 里采集后喂进来
+  let source = process.stdin;
+  if (!process.argv.includes('--stdin')) {
+    const input = process.platform === 'darwin'
+      ? ['-f', 'avfoundation', '-i', `:${process.env.NTR_MIC || 'default'}`]
+      : ['-f', 'alsa', '-i', process.env.NTR_MIC || 'default'];
+    const ff = spawn('ffmpeg', ['-hide_banner', '-loglevel', 'error', ...input, '-ac', '1', '-ar', String(RATE), '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'inherit'] });
+    ff.on('error', () => { console.error('需要 ffmpeg 采集麦克风（macOS：brew install ffmpeg）'); process.exit(1); });
+    ff.on('exit', (code) => { console.error(`麦克风采集退出（${code}）。macOS 要在「系统设置 → 隐私与安全性 → 麦克风」允许运行本程序的终端`); process.exit(1); });
+    source = ff.stdout;
+  }
+  source.on('end', () => process.exit(0));
   let rest = Buffer.alloc(0);
-  ff.stdout.on('data', (chunk) => {
+  source.on('data', (chunk) => {
     const b = rest.length ? Buffer.concat([rest, chunk]) : chunk;
     const n = b.length >> 1;
     const f = new Float32Array(n);

@@ -106,18 +106,22 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 ## 语音唤醒（实验）
 
-说 **"小卡拉米"** 和你要派的活，一口气说完或者听到"叮"一声再说都行。这句话走与输入框相同的路由，结果会读给你听。拿不准送到哪时不会发送，这句话放进输入框，等你回到电脑再确认。全程用 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 离线识别，声音不出本机。每句话先在本地转成文字，再按拼音匹配唤醒词，容忍口语里的含糊读法（说成"小卡了你"也算）；按普通话优化。
+在菜单栏勾选 **「语音唤醒」**，然后说 **"小卡拉米"** 和你要派的活，一口气说完或者听到"叮"一声再说都行。这句话走与输入框相同的路由，结果会读给你听。拿不准送到哪时不会发送，这句话放进输入框，等你回到电脑再确认。
+
+- 第一次打开时 macOS 会请求麦克风权限，App 会把约 250MB 的模型下到 `~/.ntr/cache/models`。
+- 全程用 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 离线识别，声音不出本机，也不落盘。每句话先在本地转成文字，再按拼音匹配唤醒词，容忍口语里的含糊读法（说成"小卡了你"也算）；按普通话优化。
+- 菜单栏的麦克风指示灯只在语音唤醒打开时亮，关掉就释放麦克风。在听的时候约占单核 3% 的 CPU、550MB 内存（语音模型）。
+- 叫不醒时，先在「系统设置 → 声音 → 输入」调高输入音量。
+
+收音端也可以单独在终端或另一台机器上运行（需要 ffmpeg）：
 
 ```bash
-cd satellite
-npm install
-npm run models    # 约 250MB，下到 ~/.ntr/cache/models
-npm start         # Native Task Router 要在运行；需要 ffmpeg（brew install ffmpeg）
+cd satellite && npm install && npm run models
+npm start                          # NTR_VOICE_DEBUG=1 打印每句听到的话
+npm start -- --wav x.wav           # 用 16kHz 单声道录音代替麦克风
 ```
 
-第一次运行，macOS 会请求你启动它的那个终端使用麦克风。叫不醒时先在「系统设置 → 声音 → 输入」调高输入音量，再加 `NTR_VOICE_DEBUG=1` 运行，看它把每句话听成了什么。`NTR_MIC=<序号>` 换输入设备（`ffmpeg -f avfoundation -list_devices true -i ""` 列出序号）；`npm start -- --wav x.wav` 用 16kHz 单声道录音代替麦克风。在听的时候，菜单栏的麦克风指示灯会一直亮着。
-
-App 在 `127.0.0.1:47615`（`NTR_VOICE_PORT`）接收这句话，只接受带 `~/.ntr/voice-token` 里口令的请求，网页发不进来。
+`NTR_MIC=<序号>` 换输入设备（`ffmpeg -f avfoundation -list_devices true -i ""` 列出序号）。App 在 `127.0.0.1:47615`（`NTR_VOICE_PORT`）接收这句话，只接受带 `~/.ntr/voice-token` 里口令的请求，网页发不进来。
 
 ## 它怎么工作
 

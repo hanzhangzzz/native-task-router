@@ -97,18 +97,22 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 
 ## Voice wake (experimental)
 
-Say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. The sentence goes through the same routing as the input box and the result is read back to you. When routing is unsure, nothing is sent: the sentence waits in the input box until you're back at your computer. Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts). Recognition is tuned for Mandarin.
+Turn on **Voice wake** in the menu bar, then say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. The sentence goes through the same routing as the input box and the result is read back to you. When routing is unsure, nothing is sent: the sentence waits in the input box until you're back at your computer.
+
+- The first time, macOS asks for microphone access and the app downloads ~250 MB of models into `~/.ntr/cache/models`.
+- Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac and nothing is recorded to disk. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts). Recognition is tuned for Mandarin.
+- The macOS microphone indicator is on exactly while voice wake is on; turning it off releases the microphone. Listening costs about 3% of one CPU core and ~550 MB of memory (the speech model).
+- If it doesn't wake, raise the input volume in System Settings → Sound → Input.
+
+The listener can also run on its own, from a terminal or another machine (needs ffmpeg):
 
 ```bash
-cd satellite
-npm install
-npm run models    # ~250 MB into ~/.ntr/cache/models
-npm start         # keep Native Task Router running; needs ffmpeg (brew install ffmpeg)
+cd satellite && npm install && npm run models
+npm start                          # NTR_VOICE_DEBUG=1 prints every sentence it hears
+npm start -- --wav x.wav           # a 16 kHz mono recording instead of the microphone
 ```
 
-The first run asks for microphone access for the terminal you start it from. If it doesn't wake, raise the input volume in System Settings → Sound → Input, and run with `NTR_VOICE_DEBUG=1` to print every sentence it hears. `NTR_MIC=<index>` picks another input (`ffmpeg -f avfoundation -list_devices true -i ""` lists them); `npm start -- --wav x.wav` feeds a 16 kHz mono recording instead of the microphone. While it listens, the macOS microphone indicator stays on.
-
-The app takes the sentence on `127.0.0.1:47615` (`NTR_VOICE_PORT`) and only accepts requests that carry the token in `~/.ntr/voice-token`, so web pages can't post to it.
+`NTR_MIC=<index>` picks another input (`ffmpeg -f avfoundation -list_devices true -i ""` lists them). The app takes the sentence on `127.0.0.1:47615` (`NTR_VOICE_PORT`) and only accepts requests that carry the token in `~/.ntr/voice-token`, so web pages can't post to it.
 
 ## How it works
 

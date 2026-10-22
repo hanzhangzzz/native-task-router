@@ -1,7 +1,7 @@
 // 最小入口窗口（技术合同 §0.2 Entry 层）：全局快捷键 → 悬浮输入框 → 子进程调用 CLI `open --json`。
 // 不碰原生会话、不加载旧 desktop/；所有业务都在 src/layers/cli.ts。
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, net, dialog, shell } = require('electron');
-const { execFile } = require('node:child_process');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, net, dialog, shell, systemPreferences } = require('electron');
+const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -43,6 +43,9 @@ const T = {
     upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
     upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
     upFailed: '更新失败', upCheckFailed: '检查更新失败', upManual: '打开下载页', ok: '好',
+    trayVoice: '语音唤醒（说「小卡拉米」）', trayVoiceLoading: '语音唤醒：正在下载模型（约 250MB）…',
+    voiceNoMic: '没有麦克风权限', voiceNoMicDetail: '在「系统设置 → 隐私与安全性 → 麦克风」里允许 Native Task Router，再打开语音唤醒。', voiceOpenSettings: '打开系统设置',
+    voiceFailed: '语音唤醒没能启动',
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
@@ -54,6 +57,9 @@ const T = {
     upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
     upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
     upFailed: 'Update failed', upCheckFailed: "Couldn't check for updates", upManual: 'Open download page', ok: 'OK',
+    trayVoice: 'Voice wake (say "小卡拉米")', trayVoiceLoading: 'Voice wake: downloading models (~250 MB)…',
+    voiceNoMic: 'No microphone access', voiceNoMicDetail: 'Allow Native Task Router in System Settings → Privacy & Security → Microphone, then turn voice wake on again.', voiceOpenSettings: 'Open System Settings',
+    voiceFailed: "Voice wake couldn't start",
     voiceClarify: "Not sure where this goes. It's waiting in the input box; press the hotkey at your computer to pick.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
@@ -158,6 +164,57 @@ function startVoiceServer() {
   srv.on('error', (e) => { console.error(`语音入口没有启动（127.0.0.1:${VOICE_PORT}）：${e.message}`); trace({ ev: 'voice-server', error: e.code }); });
   srv.listen(VOICE_PORT, '127.0.0.1', () => trace({ ev: 'voice-server', port: VOICE_PORT }));
 }
+
+// ---- 语音唤醒开关（菜单栏）：打开时隐藏窗口 mic.html 采集麦克风，喂给 satellite/listen.mjs 子进程；
+// 它转写、匹配唤醒词后回调上面的语音入口。关掉即销毁采集窗口和子进程，麦克风释放、菜单栏的麦克风指示灯熄灭。
+const SATELLITE = path.join(__dirname, '..', 'satellite');
+let voice = 'off'; // off | loading（下载模型）| on
+let micWin = null;
+let listener = null;
+async function startVoice() {
+  if (voice !== 'off') return;
+  if (process.platform === 'darwin' && !(await systemPreferences.askForMediaAccess('microphone'))) {
+    saveSettings({ voiceWake: false });
+    refreshTray();
+    const { response } = await dialog.showMessageBox({ type: 'warning', message: t().voiceNoMic, detail: t().voiceNoMicDetail, buttons: [t().voiceOpenSettings, t().ok], defaultId: 0, cancelId: 1 });
+    if (response === 0) void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone');
+    return;
+  }
+  voice = 'loading';
+  refreshTray();
+  // 模型已在就秒回；没有就下载到 ~/.ntr/cache/models
+  const err = await new Promise((resolve) => execFile('bash', [path.join(SATELLITE, 'fetch-models.sh')], { env: childEnv(), timeout: 30 * 60_000 }, (e, _o, se) => resolve(e ? String(se || e).trim() : null)));
+  if (voice !== 'loading') return; // 下载途中被关掉
+  if (err) return voiceFailed(err);
+  listener = spawn(process.execPath, [path.join(SATELLITE, 'listen.mjs'), '--stdin'], { env: { ...childEnv(), NTR_VOICE_PORT: String(VOICE_PORT) }, stdio: ['pipe', 'ignore', 'pipe'] });
+  let stderr = '';
+  listener.stderr.on('data', (b) => { stderr = (stderr + b).slice(-2000); });
+  listener.stdin.on('error', () => { /* 子进程退出时还在写 */ });
+  listener.on('exit', (code) => { trace({ ev: 'voice-listener-exit', code }); if (voice === 'on') voiceFailed(stderr || `listen.mjs exit ${code}`); });
+  micWin = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false } });
+  micWin.loadFile(path.join(__dirname, 'mic.html'));
+  voice = 'on';
+  trace({ ev: 'voice', state: 'on' });
+  refreshTray();
+}
+function stopVoice() {
+  voice = 'off';
+  micWin?.destroy(); micWin = null;
+  listener?.kill(); listener = null;
+  trace({ ev: 'voice', state: 'off' });
+  refreshTray();
+}
+function voiceFailed(why) {
+  stopVoice();
+  saveSettings({ voiceWake: false });
+  void dialog.showMessageBox({ type: 'error', message: t().voiceFailed, detail: String(why).slice(0, 600) });
+}
+ipcMain.on('mic-data', (_e, buf) => { if (listener?.stdin.writable) listener.stdin.write(Buffer.from(buf)); });
+ipcMain.on('mic-error', (_e, msg) => voiceFailed(msg));
+const voiceItem = () => ({
+  label: voice === 'loading' ? t().trayVoiceLoading : t().trayVoice, type: 'checkbox', checked: voice !== 'off',
+  click: (i) => { saveSettings({ voiceWake: i.checked }); if (i.checked) void startVoice(); else stopVoice(); },
+});
 
 const label = (o, card = o.card, id = o.sessionId) => (card ? `${card.title ?? t().untitled} · ${card.project}` : id);
 function describe(o) {
@@ -334,6 +391,7 @@ function refreshTray() {
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t().trayShow(prettyKey(HOTKEY)), click: () => void show() },
     { label: t().trayHotkey, click: openHotkeyWindow },
+    voiceItem(),
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
@@ -364,6 +422,7 @@ app.whenReady().then(async () => {
     saveSettings({ openAtLogin: true });
   }
   refreshTray();
+  if (loadSettings().voiceWake) void startVoice();
   // 启动 10 秒后查一次新版本，之后每 6 小时一次；只点亮菜单，不打扰
   if (app.isPackaged) { setTimeout(() => void checkUpdate(false), 10_000); setInterval(() => void checkUpdate(false), 6 * 3600_000); }
   if (!registerHotkey(HOTKEY)) {
@@ -387,6 +446,7 @@ app.whenReady().then(async () => {
  *   {"cmd":"enter"}           在输入框按回车
  *   {"cmd":"key","key":"1"}   在窗口上按一个键(clarify 选择)
  *   {"cmd":"update"}          查新版本，有就走与菜单"更新到 x 并重启"相同的路径
+ *   {"cmd":"voice","on":true} 开关语音唤醒，与菜单勾选相同的路径
  */
 function controlFromStdin() {
   const rl = require('node:readline').createInterface({ input: process.stdin });
@@ -403,8 +463,9 @@ function controlFromStdin() {
     else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code)) });
     else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });
     else if (m.cmd === 'update') { await checkUpdate(false); trace({ ev: 'update-state', state: update.state, version: update.rel?.version ?? null }); if (update.state === 'available') await installUpdate(); }
+    else if (m.cmd === 'voice') voiceItem().click({ checked: !!m.on });
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await win.webContents.capturePage()).toPNG());
   });
 }
 app.on('window-all-closed', () => { /* 常驻：没有窗口也不退出 */ });
-app.on('will-quit', () => globalShortcut.unregisterAll());
+app.on('will-quit', () => { globalShortcut.unregisterAll(); listener?.kill(); });
