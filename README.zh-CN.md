@@ -104,6 +104,21 @@ scripts/login-item.sh install            # 可选：登录后自动启动；unin
 
 新建的会话放在 `~/ntr-tasks/<这句话的简称>-<编号>` 里；设置 `NTR_TASKS_DIR` 可以换一个目录。
 
+## 语音唤醒（实验）
+
+说 **"小卡拉米"**，听到"叮"一声后说你要派的活。这句话走与输入框相同的路由，结果会读给你听。拿不准送到哪时不会发送，这句话放进输入框，等你回到电脑再确认。全程用 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) 离线识别，声音不出本机；按普通话优化，夹几个英文词没问题。
+
+```bash
+cd satellite
+npm install
+npm run models    # 约 280MB，下到 ~/.ntr/cache/models
+npm start         # Native Task Router 要在运行；需要 ffmpeg（brew install ffmpeg）
+```
+
+第一次运行，macOS 会请求你启动它的那个终端使用麦克风。`NTR_MIC=<序号>` 换输入设备（`ffmpeg -f avfoundation -list_devices true -i ""` 列出序号）；`NTR_WAKE_THRESHOLD=0.15` 更容易唤醒，也更容易误唤醒（默认 0.25）；`npm start -- --wav x.wav` 用 16kHz 单声道录音代替麦克风。在听的时候，菜单栏的麦克风指示灯会一直亮着。
+
+App 在 `127.0.0.1:47615`（`NTR_VOICE_PORT`）接收这句话，只接受带 `~/.ntr/voice-token` 里口令的请求，网页发不进来。
+
 ## 它怎么工作
 
 ```

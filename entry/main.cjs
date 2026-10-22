@@ -2,7 +2,9 @@
 // 不碰原生会话、不加载旧 desktop/；所有业务都在 src/layers/cli.ts。
 const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, net, dialog, shell } = require('electron');
 const { execFile } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
+const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const updater = require('./updater.cjs');
@@ -41,6 +43,7 @@ const T = {
     upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
     upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
     upFailed: '更新失败', upCheckFailed: '检查更新失败', upManual: '打开下载页', ok: '好',
+    voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
@@ -51,6 +54,8 @@ const T = {
     upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
     upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
     upFailed: 'Update failed', upCheckFailed: "Couldn't check for updates", upManual: 'Open download page', ok: 'OK',
+    voiceClarify: "Not sure where this goes. It's waiting in the input box; press the hotkey at your computer to pick.",
+    voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
 };
@@ -114,6 +119,44 @@ function runCli(args) {
       }
     });
   });
+}
+
+// ---- 语音入口：satellite/ 收音端把听到的一句话 POST 过来，走与输入框相同的路由 ----
+// 只听 127.0.0.1，且必须带 ~/.ntr/voice-token 里的口令：网页也能向 localhost 发请求，没有口令就能往会话里注入文字。
+const VOICE_PORT = Number(process.env.NTR_VOICE_PORT) || 47615;
+function voiceToken() {
+  const file = path.join(NTR_HOME, 'voice-token');
+  try { const tok = fs.readFileSync(file, 'utf8').trim(); if (tok) return tok; } catch { /* 第一次：生成 */ }
+  const tok = crypto.randomBytes(24).toString('hex');
+  fs.mkdirSync(NTR_HOME, { recursive: true });
+  fs.writeFileSync(file, tok + '\n', { mode: 0o600 });
+  return tok;
+}
+function startVoiceServer() {
+  const token = Buffer.from(voiceToken());
+  const authorized = (h) => { const b = Buffer.from(String(h || '').replace(/^Bearer /, '')); return b.length === token.length && crypto.timingSafeEqual(b, token); };
+  const srv = http.createServer((req, res) => {
+    const reply = (code, o) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(o)); };
+    if (req.method !== 'POST' || req.url !== '/utterance') return reply(404, { error: 'not found' });
+    if (!authorized(req.headers.authorization)) return reply(401, { error: 'bad token' });
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', (c) => { body += c; if (body.length > 65536) req.destroy(); });
+    req.on('end', async () => {
+      let text = '';
+      try { text = String(JSON.parse(body).text || '').trim(); } catch { /* 下面按空处理 */ }
+      if (!text) return reply(400, { error: 'empty text' });
+      // 人多半不在屏幕前：不带"正在看的终端"语境
+      const r = await runCli(['open', '--json', '--', text]);
+      trace({ ev: 'voice', action: r.action });
+      // 拿不准时不弹窗抢焦点：这句话放进输入框，回到电脑按快捷键确认去处
+      if (r.action !== 'clarify') return reply(200, { action: r.action, line: r.line });
+      const placed = await win.webContents.executeJavaScript(`window.__ntrPrefill(${JSON.stringify(text)})`).catch(() => false);
+      reply(200, { action: r.action, placed, line: placed ? t().voiceClarify : t().voiceClarifyBusy });
+    });
+  });
+  srv.on('error', (e) => { console.error(`语音入口没有启动（127.0.0.1:${VOICE_PORT}）：${e.message}`); trace({ ev: 'voice-server', error: e.code }); });
+  srv.listen(VOICE_PORT, '127.0.0.1', () => trace({ ev: 'voice-server', port: VOICE_PORT }));
 }
 
 const label = (o, card = o.card, id = o.sessionId) => (card ? `${card.title ?? t().untitled} · ${card.project}` : id);
@@ -312,6 +355,7 @@ app.whenReady().then(async () => {
   LANG = pickLang();
   loginEnv = await resolveLoginEnv();
   createWindow();
+  startVoiceServer();
   tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'assets', 'trayTemplate.png')));
   tray.setToolTip('Native Task Router');
   // 打包版第一次运行：默认开机自动启动（菜单栏可关）

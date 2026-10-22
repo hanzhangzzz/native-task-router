@@ -1,4 +1,4 @@
-// 入口界面验收（多行自动长高、候选上下键选择、← 历史会话）。用桩 CLI，不碰 iTerm 和任何真实会话；
+// 入口界面验收（多行自动长高、候选上下键选择、← 历史会话、语音入口）。用桩 CLI，不碰 iTerm 和任何真实会话；
 // 会短暂弹出入口窗口。用法: node scripts/entry-ux.live.mjs    日志与截图: .runtime/entry-ux/
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -10,6 +10,9 @@ fs.rmSync(D, { recursive: true, force: true });
 fs.mkdirSync(D, { recursive: true });
 const TRACE = path.join(D, 'trace.jsonl');
 const STUB_LOG = path.join(D, 'stub-calls.jsonl');
+// 语音入口的口令与端口用隔离目录，不碰 ~/.ntr 和正在用的 app
+const HOME = path.join(D, 'home');
+const VOICE_PORT = '47698';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => { ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${ok ? '' : '  ' + detail}`); };
@@ -17,7 +20,7 @@ const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split
 const calls = () => lines(STUB_LOG).filter((a) => a[0] === 'open');
 
 const el = spawn(path.join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(ROOT, 'entry/main.cjs')], {
-  env: { ...process.env, NTR_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), NTR_STUB_LOG: STUB_LOG, NTR_ENTRY_TRACE: TRACE, NTR_ENTRY_CONTROL: 'stdin', NTR_HOTKEY: 'Control+Alt+Shift+F12' },
+  env: { ...process.env, NTR_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), NTR_STUB_LOG: STUB_LOG, NTR_ENTRY_TRACE: TRACE, NTR_ENTRY_CONTROL: 'stdin', NTR_HOTKEY: 'Control+Alt+Shift+F12', NTR_HOME: HOME, NTR_VOICE_PORT: VOICE_PORT },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 let out = '';
@@ -164,6 +167,35 @@ try {
   check('请求还在路上时再打开 → 保持处理中，不重置', pk.inflight === true && pk.mode === 'busy', JSON.stringify(pk));
   for (let i = 0; i < 40; i++) { await sleep(150); pk = await probe(); if (pk.mode === 'choose') break; }
   check('在路上的结果回来后照常显示候选（没有丢）', pk.mode === 'choose' && pk.items.length === 3, JSON.stringify(pk));
+
+  // ---- 5. 语音入口：127.0.0.1 POST /utterance，口令不对不路由；拿不准时不弹窗，放进输入框 ----
+  send({ cmd: 'hide' });
+  await sleep(300);
+  const token = fs.readFileSync(path.join(HOME, 'voice-token'), 'utf8').trim();
+  const post = (body, tok = token, url = '/utterance') => fetch(`http://127.0.0.1:${VOICE_PORT}${url}`, { method: 'POST', headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const n0 = calls().length;
+  check('口令不对 → 401，不路由', (await post({ text: '不该送出' }, 'x'.repeat(token.length))).status === 401 && calls().length === n0);
+  check('不带口令 → 401', (await fetch(`http://127.0.0.1:${VOICE_PORT}/utterance`, { method: 'POST', body: '{"text":"不该送出"}' })).status === 401 && calls().length === n0);
+  check('别的路径 → 404', (await post({ text: '不该送出' }, token, '/')).status === 404 && calls().length === n0);
+  const vr = await (await post({ text: '语音说的一句' })).json();
+  check('语音一句 → 走路由（不带聚焦终端），返回可播报的结果', vr.action === 'wrote' && !!vr.line && JSON.stringify(calls().at(-1)) === JSON.stringify(['open', '--json', '--', '语音说的一句']), JSON.stringify({ vr, call: calls().at(-1) }));
+  const shown0 = lines(TRACE).filter((e) => e.ev === 'shown').length;
+  // 此刻输入框停在上一句的候选列表（没发出去）：语音这句不能拼进去
+  const vb = await (await post({ text: 'CLARIFY 语音第一句' })).json();
+  pk = await probe();
+  check('框里有没发出去的话 → 语音这句不放进去，提示重说', vb.action === 'clarify' && vb.placed === false && vb.line.includes('再说一次') && pk.value === 'SLOW CLARIFY 慢的一句', JSON.stringify({ vb, pk }));
+  await show();
+  send({ cmd: 'type', text: '' });
+  await sleep(200);
+  send({ cmd: 'hide' });
+  await sleep(300);
+  const vc = await (await post({ text: 'CLARIFY 语音拿不准的一句' })).json();
+  pk = await probe();
+  check('框是空的 → 原句放进输入框，提示回电脑确认', vc.action === 'clarify' && vc.placed === true && vc.line.includes('输入框') && pk.mode === 'input' && pk.value === 'CLARIFY 语音拿不准的一句', JSON.stringify({ vc, pk }));
+  check('语音拿不准 → 不弹出窗口', lines(TRACE).filter((e) => e.ev === 'shown').length === shown0 + 1);
+  await show();
+  pk = await probe();
+  check('回到电脑唤起 → 那句话还在输入框', pk.mode === 'input' && pk.value === 'CLARIFY 语音拿不准的一句', JSON.stringify(pk));
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {
