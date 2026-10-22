@@ -97,16 +97,16 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 
 ## Voice wake (experimental)
 
-Say **"小卡拉米"** (xiǎo kǎ lā mǐ), wait for the chime, then say your task. The sentence goes through the same routing as the input box and the result is read back to you. When routing is unsure, nothing is sent: the sentence waits in the input box until you're back at your computer. Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac. Recognition is tuned for Mandarin (English words in between are fine).
+Say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. The sentence goes through the same routing as the input box and the result is read back to you. When routing is unsure, nothing is sent: the sentence waits in the input box until you're back at your computer. Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts). Recognition is tuned for Mandarin.
 
 ```bash
 cd satellite
 npm install
-npm run models    # ~280 MB into ~/.ntr/cache/models
+npm run models    # ~250 MB into ~/.ntr/cache/models
 npm start         # keep Native Task Router running; needs ffmpeg (brew install ffmpeg)
 ```
 
-The first run asks for microphone access for the terminal you start it from. `NTR_MIC=<index>` picks another input (`ffmpeg -f avfoundation -list_devices true -i ""` lists them); `NTR_WAKE_THRESHOLD=0.15` makes waking easier, and also false wakes more likely (default 0.25). `npm start -- --wav x.wav` feeds a 16 kHz mono recording instead of the microphone. While it listens, the macOS microphone indicator stays on.
+The first run asks for microphone access for the terminal you start it from. If it doesn't wake, raise the input volume in System Settings → Sound → Input, and run with `NTR_VOICE_DEBUG=1` to print every sentence it hears. `NTR_MIC=<index>` picks another input (`ffmpeg -f avfoundation -list_devices true -i ""` lists them); `npm start -- --wav x.wav` feeds a 16 kHz mono recording instead of the microphone. While it listens, the macOS microphone indicator stays on.
 
 The app takes the sentence on `127.0.0.1:47615` (`NTR_VOICE_PORT`) and only accepts requests that carry the token in `~/.ntr/voice-token`, so web pages can't post to it.
 
