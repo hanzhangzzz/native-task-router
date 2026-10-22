@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- 语音唤醒的麦克风采集（隐藏窗口）：16kHz 单声道 s16le 发给主进程，主进程转给 satellite/listen.mjs。窗口销毁即释放麦克风。 -->
+<script>
+  (async () => {
+    try {
+      // 打开浏览器自带的自动增益：麦克风电平低（系统输入音量低、离得远）时唤醒词几乎认不出
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, autoGainControl: true, echoCancellation: false, noiseSuppression: false } });
+      const ctx = new AudioContext({ sampleRate: 16000 });
+      const src = ctx.createMediaStreamSource(stream);
+      const node = ctx.createScriptProcessor(4096, 1, 1);
+      node.onaudioprocess = (e) => {
+        const f = e.inputBuffer.getChannelData(0);
+        const pcm = new Int16Array(f.length);
+        for (let i = 0; i < f.length; i++) pcm[i] = Math.max(-1, Math.min(1, f[i])) * 32767;
+        window.ntr.micData(pcm.buffer);
+      };
+      src.connect(node);
+      node.connect(ctx.destination);
+    } catch (e) {
+      window.ntr.micError(String(e && e.message || e));
+    }
+  })();
+</script>

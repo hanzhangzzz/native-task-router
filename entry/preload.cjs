@@ -9,4 +9,6 @@ contextBridge.exposeInMainWorld('ntr', {
   setHotkey: (acc) => ipcRenderer.invoke('set-hotkey', acc),
   resize: (h) => ipcRenderer.send('resize', h),
   onShow: (cb) => ipcRenderer.on('show', () => cb()),
+  micData: (buf) => ipcRenderer.send('mic-data', buf),
+  micError: (msg) => ipcRenderer.send('mic-error', msg),
 });

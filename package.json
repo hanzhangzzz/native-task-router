@@ -1,6 +1,6 @@
 {
   "name": "native-task-router",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
   "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm / Terminal 里续上",
@@ -44,6 +44,9 @@
     "files": [
       "entry/**",
       "src/**",
+      "satellite/listen.mjs",
+      "satellite/wake.mjs",
+      "satellite/fetch-models.sh",
       "package.json"
     ],
     "directories": {
@@ -63,12 +66,17 @@
       "identity": null,
       "icon": "build/icon.icns",
       "extendInfo": {
-        "NSAppleEventsUsageDescription": "用来读取你唤起输入框时正在看的 iTerm / Terminal 标签页，并把这句话送进对应的 Claude Code / Codex 会话。"
+        "NSAppleEventsUsageDescription": "用来读取你唤起输入框时正在看的 iTerm / Terminal 标签页，并把这句话送进对应的 Claude Code / Codex 会话。",
+        "NSMicrophoneUsageDescription": "只在你打开菜单栏「语音唤醒」时使用：听唤醒词「小卡拉米」和接着说的那句话，全程在本机识别，声音不离开这台 Mac。"
       }
     },
     "dmg": {
       "title": "Native Task Router"
     },
     "afterPack": "build/sign.cjs"
+  },
+  "dependencies": {
+    "pinyin-pro": "3.29.5",
+    "sherpa-onnx-node": "1.13.8"
   }
 }
