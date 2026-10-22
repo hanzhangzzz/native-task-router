@@ -316,11 +316,16 @@ export async function routeV3(text: string, ctx: RouteContext, policy: RouterV3P
     return { kind: 'new', provider: newProvider(cwd), cwd, probability };
   };
 
-  // 候选：模型首选与 top3 → 最近活跃的线程补齐；没有新建项且不足 3 个时补一个新目录
+  // 候选：模型首选 →（首选是已有线程时）同项目新开 → top3 → 最近活跃的线程补齐；没有新建项且不足 3 个时补一个新目录
+  // top3 每个项目只写一次最佳线程，"项目对、但该新开"会被挤掉；它是项目置信度高于线程置信度时最常见的另一种答案
   const ranked: V3Option[] = [];
   const seen = new Set<string>();
   const push = (d: Dest, p: number | null) => { if (ranked.length < 3 && !seen.has(destKey(d))) { seen.add(destKey(d)); ranked.push(toOption(d, p)); } };
-  if (parsed.ok) { push(parsed.dest!, parsed.projectConfidence); for (const d of parsed.top3) push(d, null); }
+  if (parsed.ok) {
+    push(parsed.dest!, parsed.projectConfidence);
+    if (parsed.dest!.thread) push({ project: parsed.dest!.project, thread: null }, null);
+    for (const d of parsed.top3) push(d, null);
+  }
   for (const c of [...ctx.cards].sort(byRecent)) push({ project: c.cwd, thread: c }, null);
   if (!ranked.some((o) => o.kind === 'new') && ranked.length < 3) ranked.push({ kind: 'new', provider: newProvider(null), cwd: null, probability: null });
 

@@ -99,7 +99,7 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
   let calls = 0;
   const r = await router(async (req) => { calls++; return pick([A, 'a2'], 0.96, [[A, 'a1']])(req); }).route('登录页的图形验证码换成滑块验证，并补上失败重试', ctx({ live: [tty('a1', 'claude', 'idle', 1)], focusedSessionId: 'a1' }));
   check('同项目多线程：按话题选中非最近、未开着的 a2（不因 a1 正看着而写进 a1）', r.kind === 'continue' && r.sessionId === 'a2' && r.provider === 'codex' && r.auto && r.delivery === 'direct' && r.project === A && r.thread === 'a2' && calls === 1, JSON.stringify({ kind: r.kind, sid: r.sessionId }));
-  check('ranked 首项即去处，带置信度；含 3 项', r.ranked[0].kind === 'session' && r.ranked[0].sessionId === 'a2' && r.ranked[0].probability === 0.96 && r.ranked.length === 3 && r.ranked[1].sessionId === 'a1');
+  check('ranked 首项即去处，带置信度；第二项是同项目新开；含 3 项', r.ranked[0].kind === 'session' && r.ranked[0].sessionId === 'a2' && r.ranked[0].probability === 0.96 && r.ranked.length === 3 && r.ranked[1].kind === 'new' && r.ranked[1].cwd === A && r.ranked[2].sessionId === 'a1');
   check('理由带上模型的一句话', r.reason.includes('话题一致') && r.modelReason === '话题一致');
 }
 {
@@ -118,9 +118,9 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
 }
 {
   const r = await router(pick([B, 'b1'], 0.6, [[A, 'a2'], [A, 'NEW']])).route(Q, ctx());
-  check('低置信 → clarify，候选按模型 ranked：b1、a2、projA 新建', r.kind === 'clarify' && !r.auto && r.options[0].sessionId === 'b1' && r.ranked.map((o) => o.kind === 'new' ? `new:${o.cwd}` : o.sessionId).join() === `b1,a2,new:${A}`);
+  check('低置信 → clarify，候选：首选 b1、projB 新开、再按 top3 的 a2', r.kind === 'clarify' && !r.auto && r.options[0].sessionId === 'b1' && r.ranked.map((o) => o.kind === 'new' ? `new:${o.cwd}` : o.sessionId).join() === `b1,new:${B},a2`);
   const r2 = await router(pick([A, 'NEW'], 0.6, [[A, 'a1']])).route(Q, ctx());
-  check('低置信且首选是项目内新建 → ranked 第一项是新建（入口据此预选新建）', r2.kind === 'clarify' && r2.ranked[0].kind === 'new' && r2.ranked[0].cwd === A);
+  check('低置信且首选是项目内新建 → ranked 第一项是新建（入口据此预选新建），不重复列新建', r2.kind === 'clarify' && r2.ranked[0].kind === 'new' && r2.ranked[0].cwd === A && r2.ranked.filter((o) => o.kind === 'new').length === 1);
 }
 {
   const r = await router(async () => ({ text: '', costUsd: null, error: 'TimeoutError' })).route(Q, ctx());
@@ -150,7 +150,7 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
   check('项目 0.97 但线程置信度 0.84 → 分叉（线程错只影响直接还是分叉）', tier(await at(0.97, {}, [B, 'b1'], 0.84)) === 'fork');
   check('项目 0.97、线程 0.85 → 直接', tier(await at(0.97, {}, [B, 'b1'], 0.85)) === 'direct');
   const lowT = await at(0.97, {}, [B, 'b1'], 0.69);
-  check('线程置信度 0.69 < 0.7 → 确认（即使项目 0.97），候选首项仍是模型选的线程', lowT.kind === 'clarify' && lowT.holdReason === '对续哪条线程的把握不足' && lowT.ranked[0].sessionId === 'b1');
+  check('线程置信度 0.69 < 0.7 → 确认（即使项目 0.97），候选首项仍是模型选的线程，第二项是同项目新开（不只给新目录）', lowT.kind === 'clarify' && lowT.holdReason === '对续哪条线程的把握不足' && lowT.ranked[0].sessionId === 'b1' && lowT.ranked[1].kind === 'new' && lowT.ranked[1].cwd === B);
   check('线程 0.7、项目 0.9 → 分叉', tier(await at(0.9, {}, [B, 'b1'], 0.7)) === 'fork');
   check('线程置信度缺失 → 确认', tier(await router(async (req) => { const r = await pick([B, 'b1'], 0.99)(req); const j = JSON.parse(r.text); delete j.threadConfidence; return { ...r, text: JSON.stringify(j) }; }).route(Q, ctx())) === 'clarify');
   check('NTR_ROUTER_THREAD_CONFIDENCE=0：线程 0.3 也自动分叉', tier(await at(0.9, { NTR_ROUTER_THREAD_CONFIDENCE: '0' }, [B, 'b1'], 0.3)) === 'fork');
