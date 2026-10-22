@@ -1,10 +1,11 @@
 // 最小入口窗口（技术合同 §0.2 Entry 层）：全局快捷键 → 悬浮输入框 → 子进程调用 CLI `open --json`。
 // 不碰原生会话、不加载旧 desktop/；所有业务都在 src/layers/cli.ts。
-const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, screen, Tray, Menu, nativeImage, net, dialog, shell } = require('electron');
 const { execFile } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const updater = require('./updater.cjs');
 
 // 设置（快捷键、开机启动）存在 ~/.ntr/settings.json；环境变量 NTR_HOTKEY 优先（开发与测试用）
 const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
@@ -37,6 +38,9 @@ const T = {
     untitled: '(无标题)', noOutput: '无输出', wrote: (p, l) => `已送达 ${p}：${l}`, focused: (l, why) => `只聚焦 ${l}：${why}`,
     opened: (p, cwd) => `已新开 ${p}：${cwd}`, forked: (l, c) => `已分叉续接 ${l} · 置信度 ${c}`, failed: (why) => `失败：${why}`,
     trayShow: (k) => `唤起输入框（${k}）`, trayHotkey: '修改快捷键…', trayLogin: '开机自动启动', trayQuit: '退出', hotkeyTitle: '修改快捷键',
+    upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
+    upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
+    upFailed: '更新失败', upCheckFailed: '检查更新失败', upManual: '打开下载页', ok: '好',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
@@ -44,6 +48,9 @@ const T = {
     focused: (l) => `Switched to ${l} but didn't type into it (busy, waiting for approval, or has a draft). Your text is on the clipboard.`,
     opened: (p, cwd) => `Opened ${p} in a new tab: ${cwd}`, forked: (l, c) => `Forked and continued ${l} · confidence ${c}`, failed: (why) => `Failed: ${why}`,
     trayShow: (k) => `Open input box (${k})`, trayHotkey: 'Change hotkey…', trayLogin: 'Open at login', trayQuit: 'Quit', hotkeyTitle: 'Change hotkey',
+    upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
+    upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
+    upFailed: 'Update failed', upCheckFailed: "Couldn't check for updates", upManual: 'Open download page', ok: 'OK',
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
 };
@@ -229,23 +236,73 @@ ipcMain.handle('set-hotkey', (_e, acc) => {
   return { ok: true, hotkey: a, pretty: prettyKey(a) };
 });
 
+// ---- 一键升级（只在打包版：源码运行时 execPath 是 node_modules 里的 Electron，不能替换） ----
+// 运行中的 .app：<X>.app/Contents/MacOS/<可执行文件>
+const APP_PATH = path.resolve(process.execPath, '..', '..', '..');
+let update = { state: 'idle', rel: null }; // idle | available | installing
+async function checkUpdate(manual) {
+  if (update.state === 'installing') return;
+  let rel;
+  try { rel = await updater.latest(net.fetch, app.getVersion()); } catch (e) {
+    trace({ ev: 'update-check', error: String(e.message || e) });
+    if (manual) dialog.showMessageBox({ type: 'error', message: t().upCheckFailed, detail: String(e.message || e) });
+    return;
+  }
+  trace({ ev: 'update-check', latest: rel.version, newer: rel.newer });
+  if (rel.newer) { update = { state: 'available', rel }; refreshTray(); }
+  if (!manual) return;
+  if (!rel.newer) return void dialog.showMessageBox({ message: t().upLatest(app.getVersion()) });
+  const { response } = await dialog.showMessageBox({ message: t().upFound(rel.version, app.getVersion()), buttons: [t().upNow, t().upNotes, t().upLater], defaultId: 0, cancelId: 2 });
+  if (response === 0) void installUpdate();
+  else if (response === 1) void shell.openExternal(rel.page);
+}
+async function installUpdate() {
+  const rel = update.rel;
+  if (!rel || update.state === 'installing') return;
+  update = { state: 'installing', rel };
+  refreshTray();
+  try {
+    const staged = await updater.stage(rel, APP_PATH, net.fetch);
+    trace({ ev: 'update-staged', version: rel.version });
+    updater.swapAfterExit(process.pid, APP_PATH, staged, process.env.NTR_UPDATE_NO_RELAUNCH !== '1');
+    app.quit();
+  } catch (e) {
+    trace({ ev: 'update-failed', error: String(e.message || e) });
+    update = { state: 'available', rel };
+    refreshTray();
+    const { response } = await dialog.showMessageBox({ type: 'error', message: t().upFailed, detail: String(e.message || e), buttons: [t().upManual, t().ok], defaultId: 0, cancelId: 1 });
+    if (response === 0) void shell.openExternal(rel.page);
+  }
+}
+const updateItems = () => {
+  if (!app.isPackaged) return [];
+  if (update.state === 'installing') return [{ label: t().upBusy(update.rel.version), enabled: false }];
+  if (update.state === 'available') return [{ label: t().upTo(update.rel.version), click: () => void installUpdate() }];
+  return [{ label: t().upCheck, click: () => void checkUpdate(true) }];
+};
+
 // ---- 菜单栏 ----
 let tray = null;
 function refreshTray() {
   if (!tray) return;
   const login = app.isPackaged ? app.getLoginItemSettings().openAtLogin : null;
+  // 有新版本时菜单栏图标旁显示 ↑
+  tray.setTitle(update.state === 'available' ? '↑' : '');
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: t().trayShow(prettyKey(HOTKEY)), click: () => void show() },
     { label: t().trayHotkey, click: openHotkeyWindow },
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
+    ...updateItems(),
     { label: t().trayQuit, role: 'quit' },
   ]));
 }
 
 // 源码运行（npm run entry、测试）与已安装的 app 同名，会共用用户数据目录和单实例锁：源码版一启动就把唤起转给已安装的 app 后退出。分开目录。
 if (!app.isPackaged) app.setPath('userData', path.join(app.getPath('appData'), 'native-task-router-dev'));
+// 验收用：打包版与用户正在用的 app 并存时，换一个数据目录避开单实例锁
+if (process.env.NTR_USER_DATA) app.setPath('userData', process.env.NTR_USER_DATA);
 // 同一时间只允许一个入口（开机自启与手动打开会抢同一个快捷键）
 if (!app.requestSingleInstanceLock()) app.quit();
 else app.on('second-instance', () => void show());
@@ -263,6 +320,8 @@ app.whenReady().then(async () => {
     saveSettings({ openAtLogin: true });
   }
   refreshTray();
+  // 启动 10 秒后查一次新版本，之后每 6 小时一次；只点亮菜单，不打扰
+  if (app.isPackaged) { setTimeout(() => void checkUpdate(false), 10_000); setInterval(() => void checkUpdate(false), 6 * 3600_000); }
   if (!registerHotkey(HOTKEY)) {
     console.error(`全局快捷键 ${HOTKEY} 注册失败（被占用？在菜单栏「修改快捷键…」里换一个）`);
     trace({ ev: 'registered', registered: false });
@@ -283,6 +342,7 @@ app.whenReady().then(async () => {
  *   {"cmd":"type","text":..}  把文字放进输入框
  *   {"cmd":"enter"}           在输入框按回车
  *   {"cmd":"key","key":"1"}   在窗口上按一个键(clarify 选择)
+ *   {"cmd":"update"}          查新版本，有就走与菜单"更新到 x 并重启"相同的路径
  */
 function controlFromStdin() {
   const rl = require('node:readline').createInterface({ input: process.stdin });
@@ -298,6 +358,7 @@ function controlFromStdin() {
     else if (m.cmd === 'caret') await js(`(()=>{const i=document.getElementById('in');i.setSelectionRange(${Number(m.at) || 0},${Number(m.at) || 0});})()`);
     else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code)) });
     else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });
+    else if (m.cmd === 'update') { await checkUpdate(false); trace({ ev: 'update-state', state: update.state, version: update.rel?.version ?? null }); if (update.state === 'available') await installUpdate(); }
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await win.webContents.capturePage()).toPNG());
   });
 }

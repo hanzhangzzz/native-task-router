@@ -48,7 +48,7 @@ brew trust hanzhangzzz/tap                              # third-party taps must 
 brew install --cask hanzhangzzz/tap/native-task-router
 ```
 
-Then continue from step 2. Upgrade later with `brew upgrade --cask native-task-router`.
+Then continue from step 2. From 0.7.0 on, the menu bar icon shows ↑ when a new version is out; click **Update to x.y.z and restart** to upgrade in place (the download must match the published SHA-256 and the same signing certificate). `brew upgrade --cask native-task-router` works too.
 
 **Or download the dmg by hand**:
 
