@@ -1,0 +1,13 @@
+{
+  "name": "ntr-satellite",
+  "private": true,
+  "type": "module",
+  "description": "语音唤醒收音端：听到「小卡拉米」后录一句话、离线转文字，交给本机 Native Task Router 路由",
+  "scripts": {
+    "models": "bash fetch-models.sh",
+    "start": "node listen.mjs"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "1.13.8"
+  }
+}

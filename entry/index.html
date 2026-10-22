@@ -155,6 +155,13 @@
     reset();
   }
   window.ntr.onShow(onShow);
+  // 语音入口拿不准去处时主进程调用：框里没有没发出去的话才放进去（两件事拼成一句会送错），返回是否放下
+  window.__ntrPrefill = (t) => {
+    const unsent = mode === 'input' || mode === 'history' ? !!input.value.trim() : mode === 'choose' || inflight || lastAction === 'failed';
+    if (unsent) return false;
+    backToInput(t);
+    return true;
+  };
 
   async function run(p) {
     mode = 'busy'; input.disabled = true; items = []; render();
