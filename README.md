@@ -97,18 +97,19 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 
 ## Voice wake (experimental)
 
-Turn on **Voice wake** in the menu bar, then say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. Waking opens the same input box as the hotkey, and your words appear in it as you speak. When you stop, it sends after a 3-second countdown: press any key to stop the countdown and edit, or Esc to cancel. The result is shown in the box and read back to you; when routing is unsure, the options are listed in the box as usual. If the box already holds an unsent message, the spoken text is added after it and nothing is sent automatically.
+Turn on **Voice wake** in the menu bar, then say **"小卡拉米"** (xiǎo kǎ lā mǐ; change it under **Change wake word…**, any 3–6 Chinese characters) and your task, in one breath or after the chime. Waking opens the same input box as the hotkey, and your words appear in it as you speak. When you stop, it sends after a 3-second countdown: press any key to stop the countdown and edit, or Esc to cancel. The result is shown in the box and read back to you; when routing is unsure, the options are listed in the box as usual. If the box already holds an unsent message, the spoken text is added after it and nothing is sent automatically.
 
-- The first time, macOS asks for microphone access and the app downloads ~250 MB of models into `~/.ntr/cache/models`.
-- Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac and nothing is recorded to disk. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts). Recognition is tuned for Mandarin.
-- The macOS microphone indicator is on exactly while voice wake is on; turning it off releases the microphone. Listening costs about 3% of one CPU core and ~550 MB of memory (the speech model).
+- The first time, macOS asks for microphone access and the app downloads ~130 MB of models into `~/.ntr/cache/models`.
+- Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) and the [X-ASR](https://github.com/Gilgamesh-J/X-ASR) Mandarin–English model; no audio leaves your Mac and nothing is recorded to disk. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts).
+- Mixed Chinese and English works ("用 Codex 跑一下 npm test"). Common developer words and the project names of your recent sessions are passed to the recognizer as hotwords, so they come out spelled right. Whatever it still gets wrong, you can fix during the countdown; the router and the agent are language models and read past the odd homophone.
+- The macOS microphone indicator is on exactly while voice wake is on; turning it off releases the microphone. Listening costs about 2% of one CPU core and ~300 MB of memory (the speech model).
 - If it doesn't wake, raise the input volume in System Settings → Sound → Input.
 
 The listener can also run on its own, from a terminal or another machine (needs ffmpeg):
 
 ```bash
 cd satellite && npm install && npm run models
-npm start                          # NTR_VOICE_DEBUG=1 prints every sentence it hears
+npm start                          # NTR_VOICE_DEBUG=1 prints every sentence it hears; NTR_WAKE_WORD=… changes the wake word
 npm start -- --wav x.wav           # a 16 kHz mono recording instead of the microphone
 ```
 

@@ -251,6 +251,29 @@ try {
   await key('Escape');
   await sleep(3800);
   check('倒计时中 Esc → 关掉，不发送', calls().length === ne && (await visible()) === 'hidden');
+
+  // ---- 7. 修改唤醒词窗口 ----
+  let jsN = 0;
+  const wjs = async (code) => {
+    const tag = `w${++jsN}`;
+    send({ cmd: 'js', win: 'wake', tag, code });
+    for (let i = 0; i < 30; i++) { const e = lines(TRACE).find((x) => x.ev === 'js' && x.tag === tag); if (e) return e.result; await sleep(100); }
+    return null;
+  };
+  const settings = () => { try { return JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')); } catch { return {}; } };
+  const trySave = (w) => wjs(`(async()=>{const i=document.getElementById('word');i.value=${JSON.stringify(w)};i.dispatchEvent(new Event('input'));document.getElementById('save').click();await new Promise(r=>setTimeout(r,300));return document.getElementById('msg').textContent;})()`);
+  send({ cmd: 'openWake' });
+  await sleep(1000);
+  check('打开 → 显示当前唤醒词（默认小卡拉米）', (await wjs(`document.getElementById('word').value`)) === '小卡拉米');
+  send({ cmd: 'shot', win: 'wake', file: path.join(D, '7-wake-word.png') });
+  check('两个字 → 拒绝，不保存', (await trySave('小卡'))?.includes('3～6') && settings().wakeWord === undefined);
+  check('英文 → 拒绝，不保存', (await trySave('hey siri'))?.includes('3～6') && settings().wakeWord === undefined);
+  check('合格 → 保存', (await trySave('小爱同学'))?.includes('已改为') && settings().wakeWord === '小爱同学', JSON.stringify(settings()));
+  await sleep(1200);
+  send({ cmd: 'openWake' });
+  await sleep(1000);
+  check('再打开 → 显示新唤醒词', (await wjs(`document.getElementById('word').value`)) === '小爱同学');
+  await wjs('window.close()');
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {

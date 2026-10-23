@@ -43,7 +43,7 @@ const T = {
     upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
     upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
     upFailed: '更新失败', upCheckFailed: '检查更新失败', upManual: '打开下载页', ok: '好',
-    trayVoice: '语音唤醒（说「小卡拉米」）', trayVoiceLoading: '语音唤醒：正在下载模型（约 250MB）…',
+    trayVoice: (w) => `语音唤醒（说「${w}」）`, trayWake: '修改唤醒词…', wakeTitle: '修改唤醒词', wakeBad: '唤醒词要 3～6 个汉字', trayVoiceLoading: '语音唤醒：正在下载模型（约 130MB）…',
     voiceNoMic: '没有麦克风权限', voiceNoMicDetail: '在「系统设置 → 隐私与安全性 → 麦克风」里允许 Native Task Router，再打开语音唤醒。', voiceOpenSettings: '打开系统设置',
     voiceFailed: '语音唤醒没能启动',
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
@@ -58,7 +58,7 @@ const T = {
     upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
     upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
     upFailed: 'Update failed', upCheckFailed: "Couldn't check for updates", upManual: 'Open download page', ok: 'OK',
-    trayVoice: 'Voice wake (say "小卡拉米")', trayVoiceLoading: 'Voice wake: downloading models (~250 MB)…',
+    trayVoice: (w) => `Voice wake (say "${w}")`, trayWake: 'Change wake word…', wakeTitle: 'Change wake word', wakeBad: 'Use 3–6 Chinese characters', trayVoiceLoading: 'Voice wake: downloading models (~130 MB)…',
     voiceNoMic: 'No microphone access', voiceNoMicDetail: 'Allow Native Task Router in System Settings → Privacy & Security → Microphone, then turn voice wake on again.', voiceOpenSettings: 'Open System Settings',
     voiceFailed: "Voice wake couldn't start",
     voiceClarify: "Not sure where this goes. It's waiting in the input box; press the hotkey at your computer to pick.",
@@ -174,6 +174,18 @@ const SATELLITE = path.join(__dirname, '..', 'satellite');
 let voice = 'off'; // off | loading（下载模型）| on
 let micWin = null;
 let listener = null;
+// 唤醒词：3～6 个汉字（与 satellite/wake.mjs 的 validWakeWord 同一规则）
+const DEFAULT_WAKE_WORD = '小卡拉米';
+const validWakeWord = (w) => /^[一-龥]{3,6}$/.test(w);
+const wakeWord = () => loadSettings().wakeWord || DEFAULT_WAKE_WORD;
+// 最近会话的项目名当热词（native-task-router → native task router），收音端更容易把它们认对，路由也就更准
+function recentProjects() {
+  return new Promise((resolve) => execFile(process.execPath, [CLI, 'sessions', '--limit', '300'], { env: childEnv(), timeout: 30_000, maxBuffer: 4 << 20 }, (_e, out) => {
+    const names = [];
+    for (const l of String(out || '').split('\n')) { try { const p = JSON.parse(l).project; if (p) names.push(p.replace(/[-_.]+/g, ' ').trim()); } catch { /* 不是会话行 */ } }
+    resolve([...new Set(names)].slice(0, 30));
+  }));
+}
 async function startVoice() {
   if (voice !== 'off') return;
   if (process.platform === 'darwin' && !(await systemPreferences.askForMediaAccess('microphone'))) {
@@ -186,15 +198,19 @@ async function startVoice() {
   voice = 'loading';
   refreshTray();
   // 模型已在就秒回；没有就下载到 ~/.ntr/cache/models
-  const err = await new Promise((resolve) => execFile('bash', [path.join(SATELLITE, 'fetch-models.sh')], { env: childEnv(), timeout: 30 * 60_000 }, (e, _o, se) => resolve(e ? String(se || e).trim() : null)));
+  const [err, projects] = await Promise.all([
+    new Promise((resolve) => execFile('bash', [path.join(SATELLITE, 'fetch-models.sh')], { env: childEnv(), timeout: 30 * 60_000 }, (e, _o, se) => resolve(e ? String(se || e).trim() : null))),
+    recentProjects(),
+  ]);
   if (voice !== 'loading') return; // 下载途中被关掉
   if (err) return voiceFailed(err);
-  listener = spawn(process.execPath, [path.join(SATELLITE, 'listen.mjs'), '--stdin', '--events'], { env: childEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
-  require('node:readline').createInterface({ input: listener.stdout }).on('line', (l) => { try { voiceEvent(JSON.parse(l)); } catch { /* 不是事件行 */ } });
+  const child = listener = spawn(process.execPath, [path.join(SATELLITE, 'listen.mjs'), '--stdin', '--events'], { env: { ...childEnv(), NTR_WAKE_WORD: wakeWord(), NTR_HOTWORDS: projects.join('\n') }, stdio: ['pipe', 'pipe', 'pipe'] });
+  // 改唤醒词会换一个子进程：旧进程退出前的事件和退出本身都不再算数
+  require('node:readline').createInterface({ input: child.stdout }).on('line', (l) => { if (listener !== child) return; try { voiceEvent(JSON.parse(l)); } catch { /* 不是事件行 */ } });
   let stderr = '';
-  listener.stderr.on('data', (b) => { stderr = (stderr + b).slice(-2000); });
-  listener.stdin.on('error', () => { /* 子进程退出时还在写 */ });
-  listener.on('exit', (code) => { trace({ ev: 'voice-listener-exit', code }); if (voice === 'on') voiceFailed(stderr || `listen.mjs exit ${code}`); });
+  child.stderr.on('data', (b) => { stderr = (stderr + b).slice(-2000); });
+  child.stdin.on('error', () => { /* 子进程退出时还在写 */ });
+  child.on('exit', (code) => { trace({ ev: 'voice-listener-exit', code }); if (listener === child && voice === 'on') voiceFailed(stderr || `listen.mjs exit ${code}`); });
   micWin = new BrowserWindow({ show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true, backgroundThrottling: false } });
   micWin.loadFile(path.join(__dirname, 'mic.html'));
   voice = 'on';
@@ -224,8 +240,29 @@ function voiceFailed(why) {
 ipcMain.on('mic-data', (_e, buf) => { if (listener?.stdin.writable) listener.stdin.write(Buffer.from(buf)); });
 ipcMain.on('mic-error', (_e, msg) => voiceFailed(msg));
 const voiceItem = () => ({
-  label: voice === 'loading' ? t().trayVoiceLoading : t().trayVoice, type: 'checkbox', checked: voice !== 'off',
+  label: voice === 'loading' ? t().trayVoiceLoading : t().trayVoice(wakeWord()), type: 'checkbox', checked: voice !== 'off',
   click: (i) => { saveSettings({ voiceWake: i.checked }); if (i.checked) void startVoice(); else stopVoice(); },
+});
+let wakeWin = null;
+function openWakeWindow() {
+  if (wakeWin && !wakeWin.isDestroyed()) return wakeWin.focus();
+  wakeWin = new BrowserWindow({
+    width: 420, height: 250, resizable: false, minimizable: false, maximizable: false, title: t().wakeTitle,
+    webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, sandbox: true },
+  });
+  wakeWin.loadFile(path.join(__dirname, 'wake.html'));
+  if (process.platform === 'darwin') app.show();
+  wakeWin.on('closed', () => { wakeWin = null; });
+}
+ipcMain.handle('get-wake', () => ({ word: wakeWord(), lang: LANG }));
+ipcMain.handle('set-wake', (_e, w) => {
+  const word = String(w || '').trim();
+  if (!validWakeWord(word)) return { ok: false, error: t().wakeBad };
+  saveSettings({ wakeWord: word });
+  trace({ ev: 'wake-set' });
+  // 正在听：换成新唤醒词重启收音子进程（下载模型途中不用管，子进程启动时才读唤醒词）
+  if (voice === 'on') { stopVoice(); void startVoice(); } else refreshTray();
+  return { ok: true, word };
 });
 
 const label = (o, card = o.card, id = o.sessionId) => (card ? `${card.title ?? t().untitled} · ${card.project}` : id);
@@ -410,6 +447,7 @@ function refreshTray() {
     { label: t().trayShow(prettyKey(HOTKEY)), click: () => void show() },
     { label: t().trayHotkey, click: openHotkeyWindow },
     voiceItem(),
+    { label: t().trayWake, click: openWakeWindow },
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
@@ -466,10 +504,12 @@ app.whenReady().then(async () => {
  *   {"cmd":"update"}          查新版本，有就走与菜单"更新到 x 并重启"相同的路径
  *   {"cmd":"voice","on":true} 开关语音唤醒，与菜单勾选相同的路径
  *   {"cmd":"voiceEvent","ev":{..}} 假装收音子进程发来一个事件（wake/partial/final/timeout），不需要麦克风
+ *   {"cmd":"openWake"}        打开「修改唤醒词」窗口；js / shot 带 "win":"wake" 就作用在这个窗口上
  */
 function controlFromStdin() {
   const rl = require('node:readline').createInterface({ input: process.stdin });
-  const js = (code) => win.webContents.executeJavaScript(code);
+  const js = (code, w = win) => w.webContents.executeJavaScript(code);
+  const target = (m) => (m.win === 'wake' ? wakeWin : win);
   rl.on('line', async (line) => {
     let m;
     try { m = JSON.parse(line); } catch { return; }
@@ -479,12 +519,13 @@ function controlFromStdin() {
     else if (m.cmd === 'enter') await js(`document.getElementById('in').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))`);
     else if (m.cmd === 'key') await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(String(m.key))},shiftKey:${!!m.shift}}))`);
     else if (m.cmd === 'caret') await js(`(()=>{const i=document.getElementById('in');i.setSelectionRange(${Number(m.at) || 0},${Number(m.at) || 0});})()`);
-    else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code)) });
+    else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code), target(m)) });
     else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });
     else if (m.cmd === 'update') { await checkUpdate(false); trace({ ev: 'update-state', state: update.state, version: update.rel?.version ?? null }); if (update.state === 'available') await installUpdate(); }
     else if (m.cmd === 'voice') voiceItem().click({ checked: !!m.on });
     else if (m.cmd === 'voiceEvent') voiceEvent(m.ev);
-    else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await win.webContents.capturePage()).toPNG());
+    else if (m.cmd === 'openWake') openWakeWindow();
+    else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await target(m).webContents.capturePage()).toPNG());
   });
 }
 app.on('window-all-closed', () => { /* 常驻：没有窗口也不退出 */ });
