@@ -5,6 +5,8 @@
 //   npm start                     麦克风：ffmpeg 采集系统默认输入，NTR_MIC 换设备（macOS 填 ffmpeg -f avfoundation -list_devices true -i "" 列出的序号）
 //   npm start -- --wav x.wav      用 16kHz 单声道录音代替麦克风（排障、验收）
 //   --stdin                       从标准输入读 16kHz 单声道 s16le（App 菜单栏「语音唤醒」用这个）
+//   --events                      不自己路由和播报，改为往标准输出写事件（每行一个 JSON），由 App 弹出输入框：
+//                                 {"ev":"wake"} 唤醒 · {"ev":"partial","text"} 边说边出的字 · {"ev":"final","text"} 说完 · {"ev":"timeout"} 唤醒后没开口
 //   NTR_VOICE_DEBUG=1             打印每一句听到的话（调试唤醒用；默认只打印唤醒之后的话）
 import sherpa from 'sherpa-onnx-node';
 import { execFile, spawn } from 'node:child_process';
@@ -17,6 +19,8 @@ const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
 const MODELS = path.join(NTR_HOME, 'cache', 'models');
 const ENDPOINT = `http://127.0.0.1:${process.env.NTR_VOICE_PORT || 47615}/utterance`;
 const DEBUG = process.env.NTR_VOICE_DEBUG === '1';
+const EVENTS = process.argv.includes('--events');
+const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 const RATE = 16000;
 const WIN = 512; // silero VAD 每次吃 512 个采样
 const WAIT_SEC = 8; // 唤醒后这么久没开口就放弃
@@ -25,6 +29,8 @@ const PRE = 0.6 * RATE; // 从检测到说话前 0.6 秒截起
 const HANG = 0.8 * RATE; // 停顿超过 0.8 秒算一句结束
 const MAX_UTT = 20 * RATE;
 const MIN_SPEECH = 0.3 * RATE; // 说话不到 0.3 秒的当作杂音
+const PARTIAL_EVERY = 0.5 * RATE; // 说话途中每半秒把这一句重新转写一次：唤醒词说完就能弹框，后面的字边说边出
+const WAKE_WINDOW = 4 * RATE; // 还没唤醒时只在一句的前 4 秒里找唤醒词（电视、聊天不至于一直转写）
 
 const ASR = path.join(MODELS, 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09');
 if (!fs.existsSync(ASR) || !fs.existsSync(path.join(MODELS, 'silero_vad.onnx'))) {
@@ -44,7 +50,8 @@ const asr = new sherpa.OfflineRecognizer({
   },
 });
 
-const log = (s) => console.log(`[${new Date().toLocaleTimeString()}] ${s}`);
+// --events 时标准输出留给事件，日志写到标准错误
+const log = (s) => (EVENTS ? process.stderr : process.stdout).write(`[${new Date().toLocaleTimeString()}] ${s}\n`);
 const run = (cmd, args) => new Promise((r) => execFile(cmd, args, () => r()));
 const chime = () => process.platform === 'darwin' && void run('afplay', ['/System/Library/Sounds/Tink.aiff']);
 // 播报期间不收音（state=busy），免得把自己的声音当成下一句
@@ -61,13 +68,16 @@ let pending = new Float32Array(0);
 let gain = 16;
 let uttStart = -1, lastSpeech = 0, speechLen = 0;
 let waited = 0; // listen 状态下已过去的采样数
+let lastPartial = 0; // 上次中途转写时的 fed
+let uttWake = false; // 这一句里含唤醒词（要派的活是它后面的部分）
+let lastSaid = ''; // 这一句里要派的活，最近一次转写的结果
 
 const ringRead = (from, to) => {
   const out = new Float32Array(to - from);
   for (let k = from; k < to; k++) out[k - from] = ring[k % ring.length];
   return out;
 };
-const resetUtt = () => { uttStart = -1; speechLen = 0; };
+const resetUtt = () => { uttStart = -1; speechLen = 0; lastPartial = 0; };
 
 function onAudio(samples) {
   if (state === 'busy') return;
@@ -93,10 +103,39 @@ function onAudio(samples) {
     }
   }
   pending = buf.slice(i);
+  if (uttStart >= 0 && fed - Math.max(lastPartial, uttStart) >= PARTIAL_EVERY) { lastPartial = fed; partial(ringRead(uttStart, fed)); }
   if (state === 'listen' && uttStart < 0) {
     waited += samples.length;
-    if (waited > WAIT_SEC * RATE) job = finish(speak('没听到，下次再叫我'));
+    if (waited > WAIT_SEC * RATE) {
+      if (EVENTS) { emit({ ev: 'timeout' }); state = 'idle'; } else job = finish(speak('没听到，下次再叫我'));
+    }
   }
+}
+
+function woke(cost) {
+  log(`唤醒（差异 ${cost}）`);
+  if (EVENTS) emit({ ev: 'wake' });
+  chime();
+  state = 'listen'; waited = 0; uttWake = true;
+}
+
+// 这一句里要派的活：含唤醒词就取它后面的部分（这次没认出唤醒词就沿用上次的）
+function said(text) {
+  if (!uttWake) return text;
+  const m = matchWake(text);
+  return m ? m.rest : lastSaid;
+}
+
+function partial(seg) {
+  if (state === 'idle' && seg.length > WAKE_WINDOW) return;
+  const text = transcribe(seg);
+  if (state === 'idle') {
+    const m = matchWake(text);
+    if (!m) return;
+    woke(m.cost);
+  }
+  const s = said(text);
+  if (s !== lastSaid) { lastSaid = s; if (EVENTS) emit({ ev: 'partial', text: s }); }
 }
 
 function transcribe(seg) {
@@ -114,24 +153,25 @@ function transcribe(seg) {
 }
 
 async function handle(seg) {
-  const listening = state === 'listen';
-  state = 'busy';
   const text = transcribe(seg);
   if (DEBUG) log(`（听到）${text}`);
-  const wake = matchWake(text);
-  const zhLen = text.replace(/[^一-龥]/g, '').length;
-  // 已唤醒时又叫了一遍但没叫准（「小康你」），按再叫一次处理，不当成要派的活
-  if (!wake && listening && zhLen <= 6 && matchWake(text, 1.75)) { state = 'listen'; waited = 0; return; }
-  const task = wake ? wake.rest : listening ? text : '';
-  if (wake) { log(`唤醒（差异 ${wake.cost}）`); chime(); }
-  if (!wake && !listening) return finish();
-  // 唤醒词后面的话太短（"嗯""好"之类）当作没说，接着等
-  if (task.replace(/[^一-龥a-zA-Z0-9]/g, '').length < 2) {
-    if (!wake) return finish(speak('没听清，再说一次'));
-    state = 'listen'; waited = 0;
-    return;
+  if (state === 'idle') {
+    const m = matchWake(text);
+    if (!m) return;
+    woke(m.cost);
   }
+  let task = said(text);
+  if (!uttWake) {
+    const m = matchWake(text);
+    // 已唤醒时又叫了一遍：叫准了取后面的话；没叫准（「小康你」）按再叫一次处理，不当成要派的活
+    if (m) task = m.rest;
+    else if (text.replace(/[^一-龥]/g, '').length <= 6 && matchWake(text, 1.75)) task = '';
+  }
+  uttWake = false; lastSaid = '';
+  // 太短（"嗯""好"或只有唤醒词）当作没说，接着等
+  if (task.replace(/[^一-龥a-zA-Z0-9]/g, '').length < 2) { waited = 0; return; }
   log(`听到：${task}`);
+  if (EVENTS) { emit({ ev: 'final', text: task }); state = 'idle'; return; }
   return finish(route(task).then(speak));
 }
 

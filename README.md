@@ -97,7 +97,7 @@ New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to u
 
 ## Voice wake (experimental)
 
-Turn on **Voice wake** in the menu bar, then say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. The sentence goes through the same routing as the input box and the result is read back to you. When routing is unsure, nothing is sent: the sentence waits in the input box until you're back at your computer.
+Turn on **Voice wake** in the menu bar, then say **"小卡拉米"** (xiǎo kǎ lā mǐ) and your task, in one breath or after the chime. Waking opens the same input box as the hotkey, and your words appear in it as you speak. When you stop, it sends after a 3-second countdown: press any key to stop the countdown and edit, or Esc to cancel. The result is shown in the box and read back to you; when routing is unsure, the options are listed in the box as usual. If the box already holds an unsent message, the spoken text is added after it and nothing is sent automatically.
 
 - The first time, macOS asks for microphone access and the app downloads ~250 MB of models into `~/.ntr/cache/models`.
 - Everything runs offline with [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx); no audio leaves your Mac and nothing is recorded to disk. Each sentence is transcribed locally and the wake word is matched by pinyin, allowing for how it's said in casual speech ("小卡了你" counts). Recognition is tuned for Mandarin.

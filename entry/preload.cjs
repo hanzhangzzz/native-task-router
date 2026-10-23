@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('ntr', {
-  submit: (text) => ipcRenderer.invoke('submit', text),
+  submit: (text, viaVoice) => ipcRenderer.invoke('submit', text, !!viaVoice),
   pick: (choice) => ipcRenderer.invoke('pick', choice),
   cancel: () => ipcRenderer.send('cancel'),
   history: () => ipcRenderer.invoke('history'),
@@ -11,4 +11,6 @@ contextBridge.exposeInMainWorld('ntr', {
   onShow: (cb) => ipcRenderer.on('show', () => cb()),
   micData: (buf) => ipcRenderer.send('mic-data', buf),
   micError: (msg) => ipcRenderer.send('mic-error', msg),
+  onVoice: (cb) => ipcRenderer.on('voice', (_e, v) => cb(v)),
+  voiceDraft: () => ipcRenderer.send('voice-draft'),
 });
