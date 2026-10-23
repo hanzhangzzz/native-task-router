@@ -1,4 +1,4 @@
-// 入口界面验收（多行自动长高、候选上下键选择、← 历史会话、语音入口）。用桩 CLI，不碰 iTerm 和任何真实会话；
+// 入口界面验收（多行自动长高、候选上下键选择、← 历史会话、语音入口、语音唤醒弹框）。用桩 CLI，不碰 iTerm 和任何真实会话；
 // 会短暂弹出入口窗口。用法: node scripts/entry-ux.live.mjs    日志与截图: .runtime/entry-ux/
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -20,7 +20,7 @@ const lines = (f) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim().split
 const calls = () => lines(STUB_LOG).filter((a) => a[0] === 'open');
 
 const el = spawn(path.join(ROOT, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(ROOT, 'entry/main.cjs')], {
-  env: { ...process.env, NTR_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), NTR_STUB_LOG: STUB_LOG, NTR_ENTRY_TRACE: TRACE, NTR_ENTRY_CONTROL: 'stdin', NTR_HOTKEY: 'Control+Alt+Shift+F12', NTR_HOME: HOME, NTR_VOICE_PORT: VOICE_PORT },
+  env: { ...process.env, NTR_ENTRY_CLI: path.join(ROOT, 'scripts/fixtures/entry-stub-cli.mjs'), NTR_STUB_LOG: STUB_LOG, NTR_ENTRY_TRACE: TRACE, NTR_ENTRY_CONTROL: 'stdin', NTR_HOTKEY: 'Control+Alt+Shift+F12', NTR_HOME: HOME, NTR_VOICE_PORT: VOICE_PORT, NTR_NO_SPEAK: '1' },
   stdio: ['pipe', 'pipe', 'pipe'],
 });
 let out = '';
@@ -196,6 +196,61 @@ try {
   await show();
   pk = await probe();
   check('回到电脑唤起 → 那句话还在输入框', pk.mode === 'input' && pk.value === 'CLARIFY 语音拿不准的一句', JSON.stringify(pk));
+
+  // ---- 6. 语音唤醒：与快捷键同一个输入框（模拟收音子进程的事件，不用麦克风）----
+  const vev = async (ev, ms = 300) => { send({ cmd: 'voiceEvent', ev }); await sleep(ms); };
+  const speaks = () => lines(TRACE).filter((e) => e.ev === 'speak').length;
+  const visible = async () => { send({ cmd: 'js', tag: 'vis' + probeN, code: 'document.visibilityState' }); await sleep(300); return lines(TRACE).filter((e) => e.ev === 'js').at(-1)?.result; };
+  send({ cmd: 'type', text: '' });
+  send({ cmd: 'hide' });
+  await sleep(400);
+  let shownN = lines(TRACE).filter((e) => e.ev === 'shown').length;
+  await vev({ ev: 'wake' }, 900);
+  pk = await probe();
+  check('唤醒 → 弹出输入框，提示在听', lines(TRACE).filter((e) => e.ev === 'shown').length === shownN + 1 && pk.mode === 'input' && pk.msg.includes('在听') && pk.voice?.auto === true, JSON.stringify(pk));
+  await vev({ ev: 'partial', text: '帮我看一下' });
+  check('边说边出字', (await probe()).value === '帮我看一下');
+  const nv = calls().length, sp = speaks();
+  await vev({ ev: 'final', text: '帮我看一下登录页的报错' });
+  pk = await probe();
+  check('说完 → 倒计时', pk.value === '帮我看一下登录页的报错' && pk.msg.includes('3 秒后发送') && pk.voice?.counting === true, JSON.stringify(pk));
+  await sleep(3800);
+  const vc1 = calls();
+  check('倒计时到 → 走输入框的发送（路由）', vc1.length === nv + 1 && vc1.at(-1).at(-1) === '帮我看一下登录页的报错' && !vc1.at(-1).includes('--pick'), JSON.stringify(vc1.at(-1)));
+  check('语音发送的结果读出来', speaks() === sp + 1);
+
+  await sleep(2000); // 等送达后自动收起
+  await vev({ ev: 'wake' }, 900);
+  await vev({ ev: 'final', text: '第二句先别发' });
+  await key('a');
+  pk = await probe();
+  const nk = calls().length;
+  await sleep(3800);
+  check('倒计时中按键 → 停下，改成手动，不自动发送', pk.voice === null && pk.msg === '' && pk.value === '第二句先别发' && calls().length === nk, JSON.stringify(pk));
+
+  send({ cmd: 'type', text: '手打的半句' });
+  await sleep(200);
+  const sd = speaks();
+  await vev({ ev: 'wake' }, 900);
+  await vev({ ev: 'final', text: '语音这句' });
+  pk = await probe();
+  const nd = calls().length;
+  await sleep(3800);
+  check('框里有没发的话 → 语音接在后面，不自动发送，并提示', pk.value === '手打的半句\n语音这句' && pk.msg.includes('不自动发送') && calls().length === nd && speaks() === sd + 1, JSON.stringify(pk));
+
+  send({ cmd: 'type', text: '' });
+  await vev({ ev: 'wake' }, 900);
+  await vev({ ev: 'timeout' });
+  check('唤醒后没开口 → 提示没听到', (await probe()).msg.includes('没听到'));
+  await sleep(1800);
+  check('没听到且框是空的 → 自动收起', (await visible()) === 'hidden');
+
+  await vev({ ev: 'wake' }, 900);
+  await vev({ ev: 'final', text: '按 Esc 取消的一句' });
+  const ne = calls().length;
+  await key('Escape');
+  await sleep(3800);
+  check('倒计时中 Esc → 关掉，不发送', calls().length === ne && (await visible()) === 'hidden');
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {

@@ -65,6 +65,8 @@
       historyKeys: (hasText) => [['↑↓', '选择'], ['↵', hasText ? '直接发往该会话' : '设为发送目标'], ['→ / Esc', '返回']],
       to: '→ 发往 ', escCancel: 'Esc 取消', notSent: (r) => `没有自动发送：${r}`, unsure: '拿不准，选一个去处：',
       routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingHistory: '读取历史会话…', noHistory: '还没有发送过的会话',
+      vListening: '🎙 在听，说你要派的活…', vCountdown: (n) => `🎙 ${n} 秒后发送 · 任意键修改 · Esc 取消`,
+      vDraft: '🎙 框里原有没发出去的话，语音这句接在后面，不自动发送', vTimeout: '🎙 没听到',
     },
     en: {
       placeholder: 'Say one sentence · ↵ send · ⇧↵ newline · ← history', untitled: '(untitled)',
@@ -81,6 +83,8 @@
       }[r] || 'not sure where it goes'}. Pick one:`,
       unsure: 'Not sure where this goes. Pick one:',
       routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingHistory: 'Loading past sessions…', noHistory: 'No past sessions yet',
+      vListening: '🎙 Listening. Say your task…', vCountdown: (n) => `🎙 Sending in ${n}s · any key to edit · Esc to cancel`,
+      vDraft: "🎙 The box already had an unsent message; this was added after it and won't send by itself", vTimeout: "🎙 Didn't hear anything",
     },
   };
   let S = I18N.zh;
@@ -163,6 +167,43 @@
     return true;
   };
 
+  // 语音唤醒：与快捷键同一个输入框。唤醒时框里若有没发出去的话就记下来，语音的字接在后面且不自动发送（两件事拼成一句会送错）；
+  // 否则字边说边出，说完倒计时自动发送。按任意键停下倒计时改成手动，框被关掉则这一轮作废。
+  const VOICE_SECS = 3;
+  let voice = null; // { base, auto, timer }
+  const voiceEnd = () => { if (voice && voice.timer) clearInterval(voice.timer); voice = null; };
+  const voiceText = (t) => { input.value = voice.base ? voice.base + '\n' + t : t; grow(); input.setSelectionRange(input.value.length, input.value.length); };
+  window.ntr.onVoice((e) => {
+    if (e.state === 'cancel') return voiceEnd();
+    if (inflight) return;
+    if (e.state === 'wake') {
+      voiceEnd();
+      if (mode !== 'input') backToInput();
+      const base = input.value.trim();
+      voice = { base, auto: !base, timer: null };
+      return say(S.vListening);
+    }
+    if (!voice) return;
+    if (e.state === 'partial') return voiceText(e.text);
+    if (e.state === 'final') {
+      voiceText(e.text);
+      if (!voice.auto) { voiceEnd(); window.ntr.voiceDraft(); return say(S.vDraft); }
+      let left = VOICE_SECS;
+      say(S.vCountdown(left));
+      voice.timer = setInterval(() => {
+        if (--left > 0) return say(S.vCountdown(left));
+        voiceEnd(); send(true);
+      }, 1000);
+      return;
+    }
+    if (e.state === 'timeout') {
+      voiceEnd();
+      if (input.value.trim()) return say('');
+      say(S.vTimeout);
+      setTimeout(() => { if (!voice && !input.value.trim() && mode === 'input') window.ntr.cancel(); }, 1500);
+    }
+  });
+
   async function run(p) {
     mode = 'busy'; input.disabled = true; items = []; render();
     inflight = true; document.body.classList.add('thinking');
@@ -187,12 +228,12 @@
     render();
   }
 
-  function send() {
+  function send(viaVoice) {
     text = input.value.trim();
     if (!text) return;
     say(S.routing);
     if (target) run(window.ntr.pick({ text, provider: target.provider, sessionId: target.sessionId }));
-    else run(window.ntr.submit(text));
+    else run(window.ntr.submit(text, viaVoice));
   }
 
   function choose(it) {
@@ -221,6 +262,7 @@
   window.addEventListener('keydown', (e) => {
     if (e.isComposing || e.keyCode === 229) return; // 输入法组字中，回车/方向键交给输入法
     const k = e.key;
+    if (voice) { voiceEnd(); say(''); } // 语音这一轮里按了键：人在电脑前，停下倒计时，这个键照常生效
     if (k === 'Escape') {
       e.preventDefault();
       if (mode === 'history') return closeList();
@@ -255,6 +297,6 @@
     mode, inflight, lastAction, sel, items: items.map((it) => (it.kind === 'new' ? 'NEW' : `${it.provider}:${it.sessionId}`)),
     target: target ? `${target.provider}:${target.sessionId}` : null,
     value: input.value, inputHeight: input.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(input).lineHeight),
-    boxHeight: box.getBoundingClientRect().height, msg: msg.textContent, hint: hint.textContent,
+    boxHeight: box.getBoundingClientRect().height, msg: msg.textContent, hint: hint.textContent, voice: voice ? { auto: voice.auto, counting: !!voice.timer } : null,
   });
 </script>

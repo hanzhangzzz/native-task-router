@@ -46,7 +46,8 @@ const T = {
     trayVoice: '语音唤醒（说「小卡拉米」）', trayVoiceLoading: '语音唤醒：正在下载模型（约 250MB）…',
     voiceNoMic: '没有麦克风权限', voiceNoMicDetail: '在「系统设置 → 隐私与安全性 → 麦克风」里允许 Native Task Router，再打开语音唤醒。', voiceOpenSettings: '打开系统设置',
     voiceFailed: '语音唤醒没能启动',
-    voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
+    voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
+    voiceTimeout: '没听到，下次再叫我', voiceDraft: '输入框里还有没发出去的话，这句接在后面了，回到电脑处理', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
@@ -61,6 +62,8 @@ const T = {
     voiceNoMic: 'No microphone access', voiceNoMicDetail: 'Allow Native Task Router in System Settings → Privacy & Security → Microphone, then turn voice wake on again.', voiceOpenSettings: 'Open System Settings',
     voiceFailed: "Voice wake couldn't start",
     voiceClarify: "Not sure where this goes. It's waiting in the input box; press the hotkey at your computer to pick.",
+    voiceClarifyBox: 'Not sure where this goes. The options are in the input box; pick one at your computer.',
+    voiceTimeout: "Didn't hear anything.", voiceDraft: "The input box still had an unsent message, so this was added after it. Finish it at your computer.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
@@ -186,7 +189,8 @@ async function startVoice() {
   const err = await new Promise((resolve) => execFile('bash', [path.join(SATELLITE, 'fetch-models.sh')], { env: childEnv(), timeout: 30 * 60_000 }, (e, _o, se) => resolve(e ? String(se || e).trim() : null)));
   if (voice !== 'loading') return; // 下载途中被关掉
   if (err) return voiceFailed(err);
-  listener = spawn(process.execPath, [path.join(SATELLITE, 'listen.mjs'), '--stdin'], { env: { ...childEnv(), NTR_VOICE_PORT: String(VOICE_PORT) }, stdio: ['pipe', 'ignore', 'pipe'] });
+  listener = spawn(process.execPath, [path.join(SATELLITE, 'listen.mjs'), '--stdin', '--events'], { env: childEnv(), stdio: ['pipe', 'pipe', 'pipe'] });
+  require('node:readline').createInterface({ input: listener.stdout }).on('line', (l) => { try { voiceEvent(JSON.parse(l)); } catch { /* 不是事件行 */ } });
   let stderr = '';
   listener.stderr.on('data', (b) => { stderr = (stderr + b).slice(-2000); });
   listener.stdin.on('error', () => { /* 子进程退出时还在写 */ });
@@ -196,6 +200,14 @@ async function startVoice() {
   voice = 'on';
   trace({ ev: 'voice', state: 'on' });
   refreshTray();
+}
+// 收音子进程的事件：唤醒就弹出与快捷键相同的输入框，之后的字、说完、超时都交给输入框处理
+let voiceShown = Promise.resolve();
+function voiceEvent(e) {
+  trace({ ev: 'voice-event', state: e.ev });
+  if (e.ev === 'wake') voiceShown = show();
+  if (e.ev === 'timeout') speak(t().voiceTimeout);
+  void voiceShown.then(() => win.webContents.send('voice', { state: e.ev, text: e.text }));
 }
 function stopVoice() {
   voice = 'off';
@@ -245,6 +257,7 @@ function createWindow() {
 
 function hide() {
   clearTimeout(hideTimer);
+  win?.webContents.send('voice', { state: 'cancel' }); // 框被关掉：语音这一轮作废，不再自动发送
   win?.hide();
   if (process.platform === 'darwin') app.hide(); // 把焦点还给之前的 app
 }
@@ -269,11 +282,16 @@ const finishLater = (r) => {
   return r;
 };
 
-ipcMain.handle('submit', async (_e, text) => {
+// 语音发起的发送把结果读出来（人可能不在屏幕前）
+const speak = (s) => { trace({ ev: 'speak' }); if (process.env.NTR_NO_SPEAK !== '1') execFile('say', [String(s).slice(0, 120)], () => {}); };
+ipcMain.handle('submit', async (_e, text, viaVoice) => {
   const args = ['open', '--json'];
   if (focusedTty) args.push('--focused-tty', focusedTty);
-  return finishLater(await runCli([...args, '--', String(text)]));
+  const r = finishLater(await runCli([...args, '--', String(text)]));
+  if (viaVoice) speak(r.action === 'clarify' ? t().voiceClarifyBox : r.line);
+  return r;
 });
+ipcMain.on('voice-draft', () => speak(t().voiceDraft));
 ipcMain.handle('pick', async (_e, c) => {
   const prov = c.provider === 'codex' || (!c.provider && process.env.NTR_DEFAULT_PROVIDER === 'codex') ? 'codex' : 'claude';
   const args = ['open', '--json', ...(c.new ? ['--new', prov, ...(c.cwd ? ['--cwd', String(c.cwd)] : [])] : ['--pick', `${c.provider}:${c.sessionId}`])];
@@ -447,6 +465,7 @@ app.whenReady().then(async () => {
  *   {"cmd":"key","key":"1"}   在窗口上按一个键(clarify 选择)
  *   {"cmd":"update"}          查新版本，有就走与菜单"更新到 x 并重启"相同的路径
  *   {"cmd":"voice","on":true} 开关语音唤醒，与菜单勾选相同的路径
+ *   {"cmd":"voiceEvent","ev":{..}} 假装收音子进程发来一个事件（wake/partial/final/timeout），不需要麦克风
  */
 function controlFromStdin() {
   const rl = require('node:readline').createInterface({ input: process.stdin });
@@ -464,6 +483,7 @@ function controlFromStdin() {
     else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });
     else if (m.cmd === 'update') { await checkUpdate(false); trace({ ev: 'update-state', state: update.state, version: update.rel?.version ?? null }); if (update.state === 'available') await installUpdate(); }
     else if (m.cmd === 'voice') voiceItem().click({ checked: !!m.on });
+    else if (m.cmd === 'voiceEvent') voiceEvent(m.ev);
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await win.webContents.capturePage()).toPNG());
   });
 }
