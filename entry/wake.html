@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title></title>
+<style>
+  body { margin: 0; padding: 22px 24px; font: 14px -apple-system, "PingFang SC", sans-serif; color: #222; background: #f6f6f7; }
+  @media (prefers-color-scheme: dark) { body { color: #eee; background: #2a2a2d; } #word { background: #1e1e20; border-color: #555; } }
+  h1 { font-size: 15px; margin: 0 0 12px; font-weight: 600; }
+  #word { box-sizing: border-box; width: 100%; height: 52px; border: 1.5px solid #999; border-radius: 10px; text-align: center;
+          font: inherit; font-size: 24px; letter-spacing: 2px; background: #fff; color: inherit; outline: none; }
+  #word:focus { border-color: #3a5bd9; }
+  #msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: #777; }
+  #msg.err { color: #d33; } #msg.ok { color: #2a8a3a; }
+  .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  button { font: inherit; padding: 5px 14px; border-radius: 6px; border: 1px solid #aaa; background: transparent; color: inherit; }
+  button.primary { background: #3a5bd9; border-color: #3a5bd9; color: #fff; }
+  button:disabled { opacity: .45; }
+</style>
+<h1 id="h"></h1>
+<input id="word" maxlength="6" spellcheck="false">
+<div id="msg"></div>
+<div class="row"><button id="cancel"></button><button id="save" class="primary" disabled></button></div>
+<script>
+  const word = document.getElementById('word'), msg = document.getElementById('msg'), save = document.getElementById('save');
+  const I18N = {
+    zh: { title: '修改唤醒词', h: '对着麦克风说这个词来唤起输入框', close: '关闭', save: '保存',
+      hint: '3～6 个汉字。挑平时不会说、念起来响亮的词，越常用越容易误唤醒', saved: (w) => `已改为「${w}」` },
+    en: { title: 'Change wake word', h: 'Say this word to open the input box', close: 'Close', save: 'Save',
+      hint: '3–6 Chinese characters. Pick something you never say in normal talk; common words wake it by mistake', saved: (w) => `Changed to "${w}"` },
+  };
+  let S = I18N.zh, current = '';
+  const say = (t, cls) => { msg.textContent = t; msg.className = cls || ''; };
+  window.ntr.getWake().then((w) => {
+    S = I18N[w.lang] || I18N.zh;
+    document.title = S.title; document.getElementById('h').textContent = S.h;
+    document.getElementById('cancel').textContent = S.close; save.textContent = S.save;
+    word.value = current = w.word;
+    say(S.hint);
+    word.select();
+  });
+  word.addEventListener('input', () => { save.disabled = !word.value.trim() || word.value.trim() === current; say(S.hint); });
+  const submit = async () => {
+    if (save.disabled) return;
+    const r = await window.ntr.setWake(word.value);
+    if (!r.ok) return say(r.error, 'err');
+    current = r.word; save.disabled = true;
+    say(S.saved(r.word), 'ok');
+    setTimeout(() => window.close(), 900);
+  };
+  save.addEventListener('click', submit);
+  // 输入法组字时的回车是选字，不是提交
+  word.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing) submit(); if (e.key === 'Escape' && !e.isComposing) window.close(); });
+  document.getElementById('cancel').addEventListener('click', () => window.close());
+  word.focus();
+</script>

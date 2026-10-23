@@ -1,5 +1,7 @@
-// 收音端：听到「小卡拉米」→ 叮一声 → 录下要派的活（也可以一口气连着说）→ 本地转文字 → 交给 Native Task Router 路由 → 把结果读出来。
-// 全部离线（sherpa-onnx）：人声检测切出每一句，SenseVoice 转文字，再按拼音模糊匹配唤醒词（wake.mjs）。
+// 收音端：听到唤醒词（默认「小卡拉米」，NTR_WAKE_WORD 换成别的 3～6 个汉字）→ 叮一声 → 录下要派的活（也可以一口气连着说）→ 本地转文字 → 交给 Native Task Router 路由 → 把结果读出来。
+// 全部离线（sherpa-onnx）：人声检测切出每一句，X-ASR 中英 zipformer 转文字（带热词），再按拼音模糊匹配唤醒词（wake.mjs）。
+// 为什么不用 SenseVoice（0.9.x 用的）：开发任务里常夹英文，它把 codex 听成 CAX、debug 听成 DEABI，「登录页」也会成「灯笼液」；
+// 同一批句子 X-ASR 加热词几乎全对，速度相当（2026-10-23 对比 SenseVoice / FireRedASR2 / Qwen3-ASR）。
 // 不用专门的唤醒词模型：真人口语里「小卡拉米」常被说成「小卡了你」，小模型逐音素比对认不出，大模型转写加近音匹配认得出。
 // 先 npm run models 把模型下到 ~/.ntr/cache/models；Native Task Router 要在运行（它提供 127.0.0.1 语音入口）。
 //   npm start                     麦克风：ffmpeg 采集系统默认输入，NTR_MIC 换设备（macOS 填 ffmpeg -f avfoundation -list_devices true -i "" 列出的序号）
@@ -7,13 +9,16 @@
 //   --stdin                       从标准输入读 16kHz 单声道 s16le（App 菜单栏「语音唤醒」用这个）
 //   --events                      不自己路由和播报，改为往标准输出写事件（每行一个 JSON），由 App 弹出输入框：
 //                                 {"ev":"wake"} 唤醒 · {"ev":"partial","text"} 边说边出的字 · {"ev":"final","text"} 说完 · {"ev":"timeout"} 唤醒后没开口
+//   NTR_WAKE_WORD=小爱同学         换唤醒词（App 里在菜单栏「修改唤醒词…」设置）
+//   NTR_HOTWORDS                  额外的热词，一行一个（App 传入最近会话的项目名），让它们更容易被认对
 //   NTR_VOICE_DEBUG=1             打印每一句听到的话（调试唤醒用；默认只打印唤醒之后的话）
 import sherpa from 'sherpa-onnx-node';
 import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { matchWake } from './wake.mjs';
+import { compileWake, DEFAULT_WAKE_WORD, matchWake, validWakeWord } from './wake.mjs';
+import { ensureBpeVocab } from './bpe-vocab.mjs';
 
 const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
 const MODELS = path.join(NTR_HOME, 'cache', 'models');
@@ -21,6 +26,9 @@ const ENDPOINT = `http://127.0.0.1:${process.env.NTR_VOICE_PORT || 47615}/uttera
 const DEBUG = process.env.NTR_VOICE_DEBUG === '1';
 const EVENTS = process.argv.includes('--events');
 const emit = (o) => process.stdout.write(JSON.stringify(o) + '\n');
+const WORD = (process.env.NTR_WAKE_WORD || DEFAULT_WAKE_WORD).trim();
+if (!validWakeWord(WORD)) { console.error(`唤醒词要 3～6 个汉字：${WORD}`); process.exit(1); }
+const WAKE = compileWake(WORD);
 const RATE = 16000;
 const WIN = 512; // silero VAD 每次吃 512 个采样
 const WAIT_SEC = 8; // 唤醒后这么久没开口就放弃
@@ -32,7 +40,7 @@ const MIN_SPEECH = 0.3 * RATE; // 说话不到 0.3 秒的当作杂音
 const PARTIAL_EVERY = 0.5 * RATE; // 说话途中每半秒把这一句重新转写一次：唤醒词说完就能弹框，后面的字边说边出
 const WAKE_WINDOW = 4 * RATE; // 还没唤醒时只在一句的前 4 秒里找唤醒词（电视、聊天不至于一直转写）
 
-const ASR = path.join(MODELS, 'sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2025-09-09');
+const ASR = path.join(MODELS, 'sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03');
 if (!fs.existsSync(ASR) || !fs.existsSync(path.join(MODELS, 'silero_vad.onnx'))) {
   console.error(`缺模型：先运行 npm run models（下载到 ${MODELS}）`);
   process.exit(1);
@@ -44,11 +52,16 @@ const vad = new sherpa.Vad({
 const asr = new sherpa.OfflineRecognizer({
   featConfig: { sampleRate: RATE, featureDim: 80 },
   modelConfig: {
-    // 固定普通话：自动判断语种时短句常被当成粤语（「就卡嘢」）
-    senseVoice: { model: path.join(ASR, 'model.int8.onnx'), language: 'zh', useInverseTextNormalization: 1 },
+    transducer: { encoder: path.join(ASR, 'encoder-epoch-99-avg-1.int8.onnx'), decoder: path.join(ASR, 'decoder-epoch-99-avg-1.onnx'), joiner: path.join(ASR, 'joiner-epoch-99-avg-1.int8.onnx') },
     tokens: path.join(ASR, 'tokens.txt'), numThreads: 2, provider: 'cpu',
+    modelingUnit: 'bpe', bpeVocab: ensureBpeVocab(ASR),
   },
+  // 热词只在 modified_beam_search 下生效
+  decodingMethod: 'modified_beam_search', maxActivePaths: 4, hotwordsScore: 1.5,
 });
+// 热词：唤醒词本身、开发里常说的英文词、App 传来的项目名。'/' 是 sherpa-onnx 的分隔符
+const DEV_TERMS = ['Claude', 'Claude Code', 'Codex', 'git', 'GitHub', 'PR', 'CI', 'README', 'commit', 'debug', 'bug', 'npm', 'API', 'TypeScript', 'JavaScript', 'Python', 'Docker', 'iTerm', 'merge', 'rebase'];
+const HOTWORDS = [...new Set([WORD, ...DEV_TERMS, ...(process.env.NTR_HOTWORDS || '').split('\n')].map((w) => w.replace(/\//g, ' ').trim()).filter(Boolean))].join('/');
 
 // --events 时标准输出留给事件，日志写到标准错误
 const log = (s) => (EVENTS ? process.stderr : process.stdout).write(`[${new Date().toLocaleTimeString()}] ${s}\n`);
@@ -122,7 +135,7 @@ function woke(cost) {
 // 这一句里要派的活：含唤醒词就取它后面的部分（这次没认出唤醒词就沿用上次的）
 function said(text) {
   if (!uttWake) return text;
-  const m = matchWake(text);
+  const m = matchWake(text, WAKE);
   return m ? m.rest : lastSaid;
 }
 
@@ -130,7 +143,7 @@ function partial(seg) {
   if (state === 'idle' && seg.length > WAKE_WINDOW) return;
   const text = transcribe(seg);
   if (state === 'idle') {
-    const m = matchWake(text);
+    const m = matchWake(text, WAKE);
     if (!m) return;
     woke(m.cost);
   }
@@ -146,26 +159,27 @@ function transcribe(seg) {
   // 前后各补 1 秒静音：短短一句「小卡拉米」不补时更容易听错（真人录音实测）
   const padded = new Float32Array(seg.length + 2 * RATE);
   padded.set(seg, RATE);
-  const st = asr.createStream();
+  const st = asr.createStream(HOTWORDS);
   st.acceptWaveform({ sampleRate: RATE, samples: padded });
   asr.decode(st);
-  return asr.getResult(st).text.trim();
+  // 模型会给整句加句号，派活的话不需要
+  return asr.getResult(st).text.trim().replace(/[。.]$/, '');
 }
 
 async function handle(seg) {
   const text = transcribe(seg);
   if (DEBUG) log(`（听到）${text}`);
   if (state === 'idle') {
-    const m = matchWake(text);
+    const m = matchWake(text, WAKE);
     if (!m) return;
     woke(m.cost);
   }
   let task = said(text);
   if (!uttWake) {
-    const m = matchWake(text);
-    // 已唤醒时又叫了一遍：叫准了取后面的话；没叫准（「小康你」）按再叫一次处理，不当成要派的活
+    const m = matchWake(text, WAKE);
+    // 已唤醒时又叫了一遍：叫准了取后面的话；没叫准（「小卡拉米」说成「小康你」）按再叫一次处理，不当成要派的活
     if (m) task = m.rest;
-    else if (text.replace(/[^一-龥]/g, '').length <= 6 && matchWake(text, 1.75)) task = '';
+    else if (text.replace(/[^一-龥]/g, '').length <= WAKE.syl.length + 2 && matchWake(text, WAKE, WAKE.looseCost)) task = '';
   }
   uttWake = false; lastSaid = '';
   // 太短（"嗯""好"或只有唤醒词）当作没说，接着等
@@ -228,5 +242,5 @@ if (wavAt > 0) {
     rest = b.subarray(n * 2);
     onAudio(f);
   });
-  log('在听：说「小卡拉米」唤醒，可以接着一口气说要派的活');
+  log(`在听：说「${WORD}」唤醒，可以接着一口气说要派的活`);
 }

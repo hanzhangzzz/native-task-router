@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('ntr', {
   lang: () => ipcRenderer.invoke('lang'),
   getHotkey: () => ipcRenderer.invoke('get-hotkey'),
   setHotkey: (acc) => ipcRenderer.invoke('set-hotkey', acc),
+  getWake: () => ipcRenderer.invoke('get-wake'),
+  setWake: (w) => ipcRenderer.invoke('set-wake', w),
   resize: (h) => ipcRenderer.send('resize', h),
   onShow: (cb) => ipcRenderer.on('show', () => cb()),
   micData: (buf) => ipcRenderer.send('mic-data', buf),
