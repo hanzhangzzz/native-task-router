@@ -38,7 +38,9 @@ const HANG = 0.8 * RATE; // 停顿超过 0.8 秒算一句结束
 const MAX_UTT = 20 * RATE;
 const MIN_SPEECH = 0.3 * RATE; // 说话不到 0.3 秒的当作杂音
 const PARTIAL_EVERY = 0.5 * RATE; // 说话途中每半秒把这一句重新转写一次：唤醒词说完就能弹框，后面的字边说边出
-const WAKE_WINDOW = 4 * RATE; // 还没唤醒时只在一句的前 4 秒里找唤醒词（电视、聊天不至于一直转写）
+// 还没唤醒时每次只转写这一句最近 3 秒找唤醒词：背景一直有人说话（电视）时一句会拖得很长，
+// 只看开头的话中途喊的唤醒词要等这句结束才认出来；每次重转整句又太费 CPU
+const WAKE_WINDOW = 3 * RATE;
 
 const ASR = path.join(MODELS, 'sherpa-onnx-x-asr-zipformer-transducer-zh-en-punct-int8-2026-06-03');
 if (!fs.existsSync(ASR) || !fs.existsSync(path.join(MODELS, 'silero_vad.onnx'))) {
@@ -59,9 +61,11 @@ const asr = new sherpa.OfflineRecognizer({
   // 热词只在 modified_beam_search 下生效
   decodingMethod: 'modified_beam_search', maxActivePaths: 4, hotwordsScore: 1.5,
 });
-// 热词：唤醒词本身、开发里常说的英文词、App 传来的项目名。'/' 是 sherpa-onnx 的分隔符
+// 热词：唤醒词本身、开发里常说的英文词、App 传来的项目名。'/' 是 sherpa-onnx 的分隔符，' :5' 是这个词单独的加分。
+// 唤醒词加得重：它不是真词，模型是中英双语的，真人随口说的「小卡拉米」会被转成英文「so color me」，拼音就对不上了
+// （2026-10-24 真人录音：加分 5 时开着电视也能认出、电视对白零误唤醒；加到 8 开始吞字）
 const DEV_TERMS = ['Claude', 'Claude Code', 'Codex', 'git', 'GitHub', 'PR', 'CI', 'README', 'commit', 'debug', 'bug', 'npm', 'API', 'TypeScript', 'JavaScript', 'Python', 'Docker', 'iTerm', 'merge', 'rebase'];
-const HOTWORDS = [...new Set([WORD, ...DEV_TERMS, ...(process.env.NTR_HOTWORDS || '').split('\n')].map((w) => w.replace(/\//g, ' ').trim()).filter(Boolean))].join('/');
+const HOTWORDS = [...new Set([`${WORD} :5`, ...DEV_TERMS, ...(process.env.NTR_HOTWORDS || '').split('\n')].map((w) => w.replace(/\//g, ' ').trim()).filter(Boolean))].join('/');
 
 // --events 时标准输出留给事件，日志写到标准错误
 const log = (s) => (EVENTS ? process.stderr : process.stdout).write(`[${new Date().toLocaleTimeString()}] ${s}\n`);
@@ -116,7 +120,8 @@ function onAudio(samples) {
     }
   }
   pending = buf.slice(i);
-  if (uttStart >= 0 && fed - Math.max(lastPartial, uttStart) >= PARTIAL_EVERY) { lastPartial = fed; partial(ringRead(uttStart, fed)); }
+  // 还没唤醒时每秒找一次唤醒词就够了（背景一直有人说话时省一半 CPU）；唤醒后每半秒出一次字
+  if (uttStart >= 0 && fed - Math.max(lastPartial, uttStart) >= (state === 'idle' ? 2 : 1) * PARTIAL_EVERY) { lastPartial = fed; partial(); }
   if (state === 'listen' && uttStart < 0) {
     waited += samples.length;
     if (waited > WAIT_SEC * RATE) {
@@ -139,12 +144,13 @@ function said(text) {
   return m ? m.rest : lastSaid;
 }
 
-function partial(seg) {
-  if (state === 'idle' && seg.length > WAKE_WINDOW) return;
-  const text = transcribe(seg);
+function partial() {
+  const from = state === 'idle' ? Math.max(uttStart, fed - WAKE_WINDOW) : uttStart;
+  const text = transcribe(ringRead(from, fed));
   if (state === 'idle') {
     const m = matchWake(text, WAKE);
     if (!m) return;
+    uttStart = from; // 这一句从唤醒词所在的窗口算起，前面的背景声不算进要派的活
     woke(m.cost);
   }
   const s = said(text);
