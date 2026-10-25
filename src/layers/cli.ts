@@ -1,4 +1,5 @@
-// ntr CLI：`node src/layers/cli.ts open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex] [--focused-tty /dev/ttysN]`
+// ntr CLI：`node src/layers/cli.ts open "<一句话>" [--json] [--pick claude:<id> [--answer 1-9]] [--new claude|codex] [--focused-tty /dev/ttysN]`
+// 目标停在审批/选择框时：--answer N 替人选第 N 项再送达正文（正文可空，等于只答题）；不带 --answer 返回 awaiting-approval。
 // 另有 `sessions`（卡片摘要）、`live`（存活映射）。入口窗口（entry/main.cjs）以子进程调用 `open --json`。
 // 终端：iTerm 与 Terminal 都支持；新开会话去哪个见 surfaces/multi.ts 的 pickTarget（NTR_TERMINAL=iterm|terminal 可指定）。
 // 测试隔离：--window-id N（或 NTR_WINDOW_ID）把新 tab 开进指定 iTerm 窗口。
@@ -12,7 +13,7 @@ import { interimRouter } from './router/interim.ts';
 import { createRouterV2 } from './router/v2.ts';
 import { createRouterV3 } from './router/v3.ts';
 import { guarded } from './guard.ts';
-import { entryLogPath, open, readHistory, readPrevious } from './open.ts';
+import { approvalPrompt, entryLogPath, open, parsePrompt, readHistory, readPrevious, SCREEN_TAIL_LINES } from './open.ts';
 import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './types.ts';
 
 // 入口借 Electron 的 Node 跑本 CLI，靠 ELECTRON_RUN_AS_NODE=1；它只在进程启动时读一次。立刻删掉，
@@ -98,19 +99,32 @@ async function main(): Promise<number> {
   }
   if (cmd === 'tasks') {
     // 入口按 ← 展开的任务列表（一行 JSON）：running = 终端里开着的会话，按终端里窗口、标签页的顺序；
-    // recent = 其余会话，按最近活动，最多 --limit 条（默认 60，入口里打字筛选用）
+    // recent = 其余会话，按最近活动，最多 --limit 条（默认 60，入口里打字筛选用）。
+    // running 的每一项都读一次屏幕末尾：停在审批/选择框的任务带上问题与选项，入口里直接选。
+    const surface = terminals();
     const [cards, live, views] = await Promise.all([
       Promise.all(providers.map((p) => p.listSessions())).then((a) => a.flat()),
       Promise.all(providers.map((p) => p.liveSessions())).then((a) => a.flat()),
-      terminals().listViews(),
+      surface.listViews(),
     ]);
     const card = (p: ProviderId, id: string) => cards.find((c) => c.provider === p && c.sessionId === id);
-    const running = views.flatMap((v, i) => {
-      const here = live.filter((l) => l.tty && l.tty === v.tty);
-      if (here.length !== 1) return []; // 同一终端多个会话：认不准，不列
-      const l = here[0]!, c = card(l.provider, l.sessionId);
-      return [{ provider: l.provider, sessionId: l.sessionId, state: l.state, viewId: v.viewId, order: i, viewTitle: v.title, card: c ? brief(c) : null }];
-    });
+    const running = (
+      await Promise.all(
+        views.map(async (v, i) => {
+          const here = live.filter((l) => l.tty && l.tty === v.tty);
+          if (here.length !== 1) return []; // 同一终端多个会话：认不准，不列
+          const l = here[0]!, c = card(l.provider, l.sessionId);
+          let prompt = null;
+          try {
+            const tail = await surface.screenTail(v.viewId, SCREEN_TAIL_LINES);
+            prompt = approvalPrompt(tail) ? parsePrompt(tail) : null;
+          } catch {
+            /* 屏幕读不到就当没有审批框 */
+          }
+          return [{ provider: l.provider, sessionId: l.sessionId, state: l.state, viewId: v.viewId, order: i, viewTitle: v.title, card: c ? brief(c) : null, ...(prompt ? { prompt } : {}) }];
+        }),
+      )
+    ).flat();
     const open = new Set(running.map((r) => `${r.provider}:${r.sessionId}`));
     const recent = cards
       .filter((c) => !open.has(`${c.provider}:${c.sessionId}`))
@@ -127,7 +141,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (cmd !== 'open') {
-    console.error('用法: ntr open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history | tasks');
+    console.error('用法: ntr open "<一句话>" [--json] [--pick claude:<id> [--answer 1-9]] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history | tasks');
     return 2;
   }
 
@@ -136,10 +150,23 @@ async function main(): Promise<number> {
   const pickRaw = flag(args, '--pick');
   const newRaw = flag(args, '--new');
   const newCwd = flag(args, '--cwd');
+  const answerRaw = flag(args, '--answer');
   const focusedTty = flag(args, '--focused-tty') ?? null;
   const win = flag(args, '--window-id') ?? process.env.NTR_WINDOW_ID;
   const text = (literal ?? args).join(' ').trim();
-  if (!text) {
+  let answer: number | undefined;
+  if (answerRaw !== undefined) {
+    answer = Number(answerRaw);
+    if (!Number.isInteger(answer) || answer < 1 || answer > 9) {
+      console.error('--answer 取值: 1–9（选项框的第几项）');
+      return 2;
+    }
+    if (!pickRaw) {
+      console.error('--answer 要和 --pick 一起用：先知道答给哪个会话');
+      return 2;
+    }
+  }
+  if (!text && answer === undefined) {
     console.error('缺少要发送的文字');
     return 2;
   }
@@ -163,6 +190,7 @@ async function main(): Promise<number> {
     providers,
     surface: g.surface,
     pick,
+    answer,
     forceNew: newRaw === undefined ? undefined : { provider: newRaw as ProviderId, cwd: newCwd },
     focusedTty,
     windowId: win ? Number(win) : undefined,
@@ -195,7 +223,9 @@ function describe(o: OpenOutcome, card: (p: ProviderId, id: string | null) => Se
     return `${p} 会话 ${c?.title ?? c?.cwd.split('/').pop() ?? id ?? '(新)'}`;
   };
   switch (o.action) {
-    case 'wrote': return `已送达 ${name(o.provider, o.sessionId)}`;
+    case 'wrote': return `已送达 ${name(o.provider, o.sessionId)}${o.answeredOption ? `（先选了选项 ${o.answeredOption}）` : ''}`;
+    case 'awaiting-approval': return `任务在等批准${o.prompt.question ? `：${o.prompt.question}` : '，回到入口选一下'}`;
+    case 'answered': return o.option == null ? '屏幕已不在选项框，没有按键' : `已选选项 ${o.option}`;
     case 'focused-only': return `只聚焦 ${name(o.provider, o.sessionId)}: ${o.why}`;
     case 'opened':
       if (o.forkedFrom) return `已分叉续接 ${name(o.provider, o.forkedFrom)} · 置信度 ${o.confidence?.toFixed(2) ?? '?'}${o.sessionId ? `（新会话 ${o.sessionId}，原会话未改动）` : '（原会话未改动）'}`;

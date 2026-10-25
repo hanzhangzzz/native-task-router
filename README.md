@@ -34,7 +34,7 @@ npm run ntr -- route "add a per-user quota to the rate limiter"
 | --- | --- | --- |
 | Finding the session | Remember the directory and the tool, `cd` there, scroll the resume list | Say one sentence; it searches across projects and across Claude Code / Codex |
 | Context | A new session, or memory and summaries, all of them compressed | Native resume, the full session log |
-| Interface | Learn yet another desktop app | Your iTerm / Terminal and the native TUI; approvals and tools work as before |
+| Interface | Learn yet another desktop app | Your iTerm / Terminal and the native TUI; when a task stops to ask, its options come back into the input box |
 | Wrong destination | Can't happen, you did it yourself | When unsure, it asks you to pick; medium-confidence continuations go into a fork, leaving the original untouched |
 
 **It doesn't compete with Claude Code or Codex.** It runs no agent, hosts no terminal, and never approves anything for you. It only decides where a sentence should go. The better they get, the more useful it gets, and the routing model itself is swappable.
@@ -91,7 +91,15 @@ scripts/login-item.sh install            # optional: start at login; `uninstall`
 
 The input box follows your macOS language (English or Chinese); set `NTR_LANG=en` or `zh` to force one.
 
-The CLI can do the same: `npm run ntr -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, and `--new claude|codex` starts a new session.
+### Approving from the entry (0.12.0)
+
+When a task stops in the terminal to ask (Claude Code's "Do you want to proceed?", Codex's numbered choices), your sentence is held instead of sent: the question and options come back into the input box, and you pick with ↑↓ or a digit and confirm with Enter. It presses the arrow keys and Enter in that tab for you, waits until the screen leaves the choice box, then delivers the held sentence automatically.
+
+- Tasks waiting on you are marked "awaiting approval" in the task list; picking one goes straight to its options. If answering brings up the next question, that one comes back too.
+- Options are parsed from the screen's numbering starting at 1, and the arrows walk down from the currently highlighted one. If the screen is no longer on a choice box, nothing is pressed and the sentence is delivered as usual.
+- Only arrow keys and Enter are ever pressed; nothing else is touched.
+
+The CLI can do the same: `npm run ntr -- open "<sentence>"` delivers for real, `--pick claude:<session-id>` sets the target, `--new claude|codex` starts a new session, and `--answer <n>` picks option n in a choice box and then delivers the sentence.
 
 New sessions go to `~/ntr-tasks/<short name>-<number>`; set `NTR_TASKS_DIR` to use another folder.
 
@@ -135,7 +143,7 @@ sentence ─▶ local session index ─▶ group by project, list recent threads
   - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← task list, the candidate list, new) is always delivered directly, without a note.
   - Why a forked tier: a wrong send writes the sentence and the agent's reply into the wrong session's native history, and that can't be undone. "Type it but don't press Enter until you confirm" would mean watching the terminal. Forking lets this band go out automatically without dirtying any existing session. A wrong thread in the forked tier doesn't dirty the original session; the cost is that the new session lacks the context you meant to continue.
 - **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it asks you, with the session you were looking at first and the other open sessions after it by recency. This path takes tens of milliseconds.
-- **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, and that the screen shows no approval prompt (Enter would confirm its default option) and no half-typed draft of yours. A session that's busy is fine: Claude Code and Codex queue the message after the current turn. After typing it in, you stay where you are; only if a check fails does it switch to the tab and copy your sentence to the clipboard. It never starts a second process on a session that is already running.
+- **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session and that the screen holds no half-typed draft of yours. A screen stopped on an approval prompt no longer blocks delivery: the sentence is held, the question and options come back into the entry for you to pick (see above), and after the arrows and Enter are pressed and the screen leaves the choice box, it is delivered automatically. A session that's busy is fine: Claude Code and Codex queue the message after the current turn. After typing it in, you stay where you are; only if a check fails does it switch to the tab and copy your sentence to the clipboard. It never starts a second process on a session that is already running.
 - **Which terminal a new session opens in**: the one you were looking at when you opened the input box; otherwise the one that is running (iTerm if both are); if neither is running, iTerm, or Terminal when iTerm isn't installed. Set `NTR_TERMINAL=iterm` or `NTR_TERMINAL=terminal` to pin it.
 - **Terminal opens a new window**: Terminal's scripting interface can only open windows; a tab would need simulated keystrokes that steal focus, so it doesn't. If Terminal isn't running, it is started without an extra blank window and brought to the front once the window is ready, the same as a cold-started iTerm. If Terminal is already running, it doesn't steal focus.
 - **iTerm not running**: it starts iTerm first; if iTerm opens its own blank window on launch, the session goes into that window instead of leaving an empty tab behind.
@@ -183,6 +191,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 - macOS with iTerm2 or Terminal only. Sessions open in other terminals such as Ghostty or Warp can't be typed into; you get a notice and the sentence is copied to your clipboard.
 - Claude Code keeps 30 days of history by default, so older sessions can't be resumed.
 - A Codex session started with `--remote` can't be detected as running.
+- Approvals are recognized by the common questions and numbered choices starting at 1; other styles aren't detected, and the sentence is copied to the clipboard with a switch to the tab, with nothing pressed.
 - Routing needs a logged-in `claude`, and it is slow: each decision waits for `claude -p` to start and Opus to answer; the short-follow-up fast path skips the model.
 - The input box is in English or Chinese; the command-line tool's messages and logs are still in Chinese.
 

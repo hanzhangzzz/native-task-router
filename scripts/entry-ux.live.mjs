@@ -1,5 +1,5 @@
-// 入口界面验收（多行自动长高、候选上下键选择、← 历史会话、语音入口、语音唤醒弹框）。用桩 CLI，不碰 iTerm 和任何真实会话；
-// 会短暂弹出入口窗口。用法: node scripts/entry-ux.live.mjs    日志与截图: .runtime/entry-ux/
+// 入口界面验收（多行自动长高、候选上下键选择、← 任务列表、审批/选项框代答、语音入口、语音唤醒弹框）。
+// 用桩 CLI，不碰 iTerm 和任何真实会话；会短暂弹出入口窗口。用法: node scripts/entry-ux.live.mjs    日志与截图: .runtime/entry-ux/
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -84,7 +84,7 @@ try {
   await key('ArrowLeft');
   let ph = null;
   for (let i = 0; i < 30; i++) { await sleep(150); ph = await probe(); if (ph.mode === 'tasks' && ph.items.length) break; }
-  check('空输入按 ← 展开任务列表：开着的在前', ph.mode === 'tasks' && JSON.stringify(ph.items) === JSON.stringify(['claude:H1', 'codex:H3', 'codex:H2', 'claude:H4']), JSON.stringify(ph));
+  check('空输入按 ← 展开任务列表：开着的在前（含等批准的）', ph.mode === 'tasks' && JSON.stringify(ph.items) === JSON.stringify(['claude:H1', 'claude:H5', 'codex:H3', 'codex:H2', 'claude:H4']), JSON.stringify(ph));
   send({ cmd: 'shot', file: path.join(D, '3-tasks.png') });
   // 打字筛选：只剩 billing 的两条，正文不受影响
   await jsMain(`(()=>{const f=document.getElementById('filter');f.value='billing';f.dispatchEvent(new Event('input'));})()`);
@@ -92,11 +92,9 @@ try {
   check('打字筛选 → 只剩匹配的任务', JSON.stringify(pf.items) === JSON.stringify(['claude:H1', 'claude:H4']) && pf.value === '', JSON.stringify(pf));
   await key('Escape');
   pf = await probe();
-  check('筛选时 Esc → 先清空筛选，列表还在', pf.mode === 'tasks' && pf.filter === '' && pf.items.length === 4, JSON.stringify(pf));
-  await key('ArrowDown');
-  await key('ArrowDown');
+  check('筛选时 Esc → 先清空筛选，列表还在', pf.mode === 'tasks' && pf.filter === '' && pf.items.length === 5, JSON.stringify(pf));
+  await key('4'); // 直选第 4 项（codex:H2，"最近"里的任务）
   await sleep(200);
-  await key('Enter');
   const pt = await probe();
   check('选中最近的任务 → 成为发送目标，回到输入', pt.mode === 'input' && pt.target === 'codex:H2', JSON.stringify(pt));
   send({ cmd: 'shot', file: path.join(D, '4-target.png') });
@@ -298,6 +296,49 @@ try {
   await sleep(1000);
   check('再打开 → 显示新唤醒词', (await wjs(`document.getElementById('word').value`)) === '小爱同学');
   await wjs('window.close()');
+
+  // ---- 8. 审批/选项框：发送被拦下 → 选项摆进框里替它选，选完自动送达；任务列表里也能直接处理 ----
+  await show();
+  send({ cmd: 'type', text: 'APPROVAL 帮我继续清理' });
+  send({ cmd: 'enter' });
+  let pa = null;
+  for (let i = 0; i < 40; i++) { await sleep(150); pa = await probe(); if (pa.mode === 'approve') break; }
+  check('目标停在审批框 → 选项摆进框里，正文先拿着', pa.mode === 'approve' && pa.ap?.n === 3 && pa.target === 'claude:AUTO' && pa.value === 'APPROVAL 帮我继续清理', JSON.stringify(pa));
+  send({ cmd: 'shot', file: path.join(D, '8-approve.png') });
+  await key('ArrowDown');
+  check('↓ 移到第 2 个选项', (await probe()).sel === 1);
+  const before8 = calls().length;
+  await key('Enter');
+  for (let i = 0; i < 50; i++) { if (calls().length >= before8 + 1) break; await sleep(100); }
+  const ca = calls().at(-1);
+  check('回车确认第 2 项 → 代答后自动送达原句', JSON.stringify(ca) === JSON.stringify(['open', '--json', '--pick', 'claude:AUTO', '--answer', '2', '--', 'APPROVAL 帮我继续清理']), JSON.stringify(ca));
+  for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).lastAction === 'wrote') break; }
+  check('代答送达 → 显示已送达（带先选了哪项）', (await probe()).lastAction === 'wrote');
+
+  // Esc 退出审批 → 回到输入，话还在
+  await show();
+  send({ cmd: 'type', text: 'APPROVAL 先不批' });
+  send({ cmd: 'enter' });
+  for (let i = 0; i < 40; i++) { await sleep(150); if ((await probe()).mode === 'approve') break; }
+  await key('Escape');
+  const pe8 = await probe();
+  check('审批里 Esc → 回到输入，原句还在', pe8.mode === 'input' && pe8.value === 'APPROVAL 先不批', JSON.stringify(pe8));
+
+  // 任务列表：等批准的任务直接选，没有正文时只答题
+  send({ cmd: 'type', text: '' });
+  await key('ArrowLeft');
+  for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
+  const before8c = calls().length;
+  await key('2');
+  let ph5 = await probe();
+  check('选中等批准的任务 → 选项直接摆进框里（无 CLI 调用）', ph5.mode === 'approve' && ph5.target === 'claude:H5' && ph5.ap?.n === 3 && calls().length === before8c, JSON.stringify(ph5));
+  const before8b = calls().length;
+  send({ cmd: 'key', key: '1' });
+  for (let i = 0; i < 50; i++) { if (calls().length >= before8b + 1) break; await sleep(100); }
+  const cq = calls().at(-1);
+  check('数字键选第 1 项（无正文）→ 只答题不送正文', JSON.stringify(cq) === JSON.stringify(['open', '--json', '--pick', 'claude:H5', '--answer', '1']), JSON.stringify(cq));
+  for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).lastAction === 'answered') break; }
+  check('只答题 → 显示已选', (await probe()).lastAction === 'answered');
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {

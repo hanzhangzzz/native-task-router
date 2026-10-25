@@ -7,6 +7,7 @@ if (args[0] === 'tasks') {
   console.log(JSON.stringify({
     running: [
       { provider: 'claude', sessionId: 'H1', state: 'idle', viewId: 'V1', order: 0, card: card('数据库迁移', 'billing', '迁移要能重跑', '迁移脚本已改成可重入，测试全过。') },
+      { provider: 'claude', sessionId: 'H5', state: 'waiting', viewId: 'V5', order: 1, card: card('清理临时文件', 'utils', '删掉过期的临时目录', '准备删除 tmp/cache 下的过期文件…'), prompt: { question: 'Do you want to proceed?', context: '$ rm -rf tmp/cache/old', options: [{ label: 'Yes' }, { label: 'Yes, and always allow in this project' }, { label: 'No' }] } },
       { provider: 'codex', sessionId: 'H3', state: 'busy', viewId: 'V3', order: 2, card: card('前端打包优化', 'web', '把首屏包拆小', '正在分析 bundle 体积…') },
     ],
     recent: [
@@ -23,11 +24,17 @@ if (args[0] === 'history') {
   ]));
   process.exit(0);
 }
-const text = args[args.indexOf('--') + 1] ?? '';
+const text = args.includes('--') ? (args[args.indexOf('--') + 1] ?? '') : '';
 const pick = args.indexOf('--pick') >= 0 ? args[args.indexOf('--pick') + 1] : null;
 const nw = args.indexOf('--new') >= 0 ? args[args.indexOf('--new') + 1] : null;
+const answer = args.indexOf('--answer') >= 0 ? args[args.indexOf('--answer') + 1] : null;
 if (text.includes('SLOW')) await new Promise((r) => setTimeout(r, 2500));
 if (text.includes('FAIL')) console.log(JSON.stringify({ action: 'failed', why: '桩：模拟失败' }));
+else if (answer) {
+  const [provider, sessionId] = pick.split(':');
+  console.log(JSON.stringify(text ? { action: 'wrote', viewId: 'V', provider, sessionId, answeredOption: Number(answer) } : { action: 'answered', viewId: 'V', provider, sessionId, option: Number(answer) }));
+}
+else if (text.includes('APPROVAL')) console.log(JSON.stringify({ action: 'awaiting-approval', viewId: 'V', provider: 'claude', sessionId: 'AUTO', prompt: { question: 'Do you want to proceed?', context: '$ rm -rf tmp/cache/old', options: [{ label: 'Yes' }, { label: 'Yes, and always allow in this project' }, { label: 'No' }] }, card: card('清理临时文件', 'utils', '删掉过期的临时目录') }));
 else if (pick) { const [provider, sessionId] = pick.split(':'); console.log(JSON.stringify({ action: 'wrote', viewId: 'V', provider, sessionId })); }
 else if (nw) console.log(JSON.stringify({ action: 'opened', viewId: 'V', provider: nw, sessionId: null, cwd: '/tmp/new' }));
 else if (text.includes('CLARIFY')) console.log(JSON.stringify({ action: 'clarify', reason: '置信度低于阈值', suggestNew: null, options: [

@@ -154,6 +154,25 @@ end run`, [viewId, pasteBody(text)]);
     if (r !== 'ok') throw new Error(`Terminal 视图不存在: ${viewId}`);
   },
 
+  /**
+   * 选项框的按键（↑↓↵Esc）。`do script` 末尾必带一个回车，所以末尾的 enter 由它出、
+   * 其余按键原样写入；只剩 enter 时写空串（等于只按一次回车）。
+   */
+  async press(viewId, keys) {
+    await assertRunning();
+    const BYTES = { up: '\u001b[A', down: '\u001b[B', enter: '\r', esc: '\u001b' };
+    let bytes = keys.map((k) => BYTES[k]).join('');
+    if (keys.at(-1) === 'enter') bytes = bytes.slice(0, -1);
+    const r = await osa(`${FIND}
+on run argv
+  set hit to my findTab(item 1 of argv)
+  if hit is missing value then return "missing"
+  tell application "Terminal" to do script (item 2 of argv) in tab (item 2 of hit) of window id (item 1 of hit)
+  return "ok"
+end run`, [viewId, bytes]);
+    if (r !== 'ok') throw new Error(`Terminal 视图不存在: ${viewId}`);
+  },
+
   async screenTail(viewId, lines) {
     await assertRunning();
     const out = await osa(`${FIND}

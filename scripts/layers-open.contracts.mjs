@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
-const { open, approvalPrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
+const { open, approvalPrompt, answerKeys, parsePrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
 const { routingNote, routingNoteNew, stripRoutingNote } = await import('../src/layers/routing-note.ts');
 
@@ -84,7 +84,7 @@ const card = (provider, sessionId, cwd, extra = {}) => ({
 
 /** liveSeq: 每次 liveSessions 调用依次返回的列表（最后一个重复使用），用于模拟"路由之后映射变了" */
 function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails = false, writeFails = false, clipFails = false, newTty = null } = {}) {
-  const calls = { write: [], focus: [], openView: [], queue: [], clip: [], liveCalls: 0, viewsCalls: 0 };
+  const calls = { write: [], focus: [], openView: [], queue: [], clip: [], press: [], liveCalls: 0, viewsCalls: 0 };
   const mkProvider = (id) => ({
     id,
     listSessions: async () => cards.filter((c) => c.provider === id),
@@ -109,7 +109,13 @@ function world({ cards = [], liveSeq = [[]], views = [], tails = {}, queueFails 
       if (writeFails) throw new Error('boom');
       calls.write.push({ v, t });
     },
-    screenTail: async (v) => tails[v] ?? CLAUDE_IDLE,
+    press: async (v, keys) => void calls.press.push({ v, keys }),
+    // tails 的值是字符串（恒定）或数组（依次返回，最后一个重复）：模拟"按了选项后屏幕离开选项框"
+    screenTail: async (v) => {
+      const t = tails[v];
+      if (Array.isArray(t)) return t.length > 1 ? t.shift() : t[0];
+      return t ?? CLAUDE_IDLE;
+    },
   };
   const opts = {
     providers: [mkProvider('claude'), mkProvider('codex')],
@@ -163,8 +169,11 @@ for (const st of ['busy', 'waiting', 'unknown']) {
   check(`S7 状态 ${st}、屏幕干净 → 照样 write，不 focus`, r.action === 'wrote' && w.calls.write.length === 1 && w.calls.focus.length === 0, JSON.stringify(r));
 }
 {
-  const { w } = await refusal('S7 屏幕是 Claude 审批框', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], tails: { V1: CLAUDE_APPROVAL } });
-  check('S7 审批框：没写进去才把视图带到前台', w.calls.focus.join() === 'V1');
+  // 审批框（2026-10-25 第二期）：不再只是聚焦，而是把选项带回入口（awaiting-approval）；由 7b 段逐条断言
+  const w = world({ ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], tails: { V1: CLAUDE_APPROVAL } });
+  const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1') });
+  check('S7 审批框 → awaiting-approval（选项带回入口）', r.action === 'awaiting-approval' && r.prompt.options.length === 3, JSON.stringify(r));
+  check('S7 审批框：不 write、不二开、不切前台', w.calls.write.length === 0 && w.calls.openView.length === 0 && w.calls.focus.length === 0 && w.calls.press.length === 0);
 }
 await refusal('草稿', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], tails: { V1: CLAUDE_DRAFT } });
 await refusal('写入前映射变化(同 tty 换了会话)', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')], [live('claude', 'S1', '/dev/ttys1')], [live('claude', 'OTHER', '/dev/ttys1')]] });
@@ -265,13 +274,72 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('Codex 空闲 → queue(线程,正文)，不按键，草稿不影响', r.action === 'wrote' && c.calls.queue.length === 1 && c.calls.queue[0].s === 'C1' && c.calls.queue[0].t === TEXT && c.calls.write.length === 0);
   const b = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5', 'busy')]], views: [view('VC', '/dev/ttys5')], tails: { VC: CODEX_APPROVAL } });
   const rb = await open(TEXT, { ...b.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
-  check('Codex 停在审批框 → 不 queue、不 write，只聚焦', rb.action === 'focused-only' && b.calls.queue.length + b.calls.write.length === 0 && b.calls.clip[0] === TEXT);
+  check('Codex 停在审批框（忙）→ 不 queue、不 write，选项带回入口', rb.action === 'awaiting-approval' && b.calls.queue.length + b.calls.write.length === 0 && b.calls.clip[0] === TEXT, JSON.stringify(rb));
+  // Codex 空闲 + 审批框：状态正是 idle（上一轮已 task_complete），曾经会走 queue 把正文随"取消"丢掉
+  const ba = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5')]], views: [view('VC', '/dev/ttys5')], tails: { VC: CODEX_APPROVAL } });
+  const rba = await open(TEXT, { ...ba.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
+  check('Codex 空闲 + 审批框 → 不 queue（消息会随取消丢失），选项带回入口', rba.action === 'awaiting-approval' && ba.calls.queue.length === 0, JSON.stringify(rba));
   const bw = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5', 'busy')]], views: [view('VC', '/dev/ttys5')] });
   const rbw = await open(TEXT, { ...bw.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
   check('Codex 忙、屏幕干净 → 按键写入由界面排队，不走 queue(会随取消丢失)', rbw.action === 'wrote' && bw.calls.write.length === 1 && bw.calls.queue.length === 0 && bw.calls.focus.length === 0, JSON.stringify(rbw));
   const f = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5')]], views: [view('VC', '/dev/ttys5')], queueFails: true });
   const rf = await open(TEXT, { ...f.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
   check('queue 失败 → failed + 剪贴板，不退回按键', rf.action === 'failed' && f.calls.write.length === 0 && f.calls.clip[0] === TEXT);
+}
+
+// ---- 7b. 审批/选项框：解析、入口接手、代答后自动送达 ----
+{
+  const ap = parsePrompt(CLAUDE_APPROVAL);
+  check('parsePrompt Claude：问题/上文/3 个选项', ap.question === 'Do you want to proceed?' && ap.context === 'touch approval-probe.txt' && ap.options.map((o) => o.label).join('|') === 'Yes|Yes, and always allow access to /x from this project|No', JSON.stringify(ap));
+  const cx = parsePrompt(CODEX_APPROVAL);
+  check('parsePrompt Codex：问题在命令上一行、命令是上文', cx.question === 'Would you like to run the following command?' && cx.context === '$ touch approval-probe.txt' && cx.options.length === 3, JSON.stringify(cx));
+  const menu = parsePrompt('Select model\n❯ 1. Opus\n  2. Haiku\n  3. Sonnet');
+  check('parsePrompt 无问句的菜单：问题取选项上方一行', menu.question === 'Select model' && menu.context === null && menu.options.length === 3, JSON.stringify(menu));
+  check('parsePrompt 编号不从 1 连续 → 不给选项（宁可不认）', parsePrompt('清单\n  2. A\n  3. B').options.length === 0);
+  check('answerKeys：光标在 1 上，↓ 到第 n 项再回车', JSON.stringify(answerKeys(1)) === JSON.stringify(['enter']) && JSON.stringify(answerKeys(3)) === JSON.stringify(['down', 'down', 'enter']));
+
+  const baseA = { cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], views: [view('V1', '/dev/ttys1')] };
+  {
+    // 代答第 3 项 + 送达正文：按 ↓↓↵，屏幕离开选项框后正文经普通闸门写入
+    const w = world({ ...baseA, tails: { V1: [CLAUDE_APPROVAL, CLAUDE_IDLE, CLAUDE_IDLE] } });
+    const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1'), answer: 3 });
+    check('代答：press 恰一次 ↓↓↵', w.calls.press.length === 1 && JSON.stringify(w.calls.press[0].keys) === JSON.stringify(['down', 'down', 'enter']), JSON.stringify(w.calls.press));
+    check('代答：框消失后正文写入，wrote 带选的项', r.action === 'wrote' && r.answeredOption === 3 && w.calls.write[0].t === TEXT, JSON.stringify(r));
+  }
+  {
+    // 只答题没有正文：answered
+    const w = world({ ...baseA, tails: { V1: [CLAUDE_APPROVAL, CLAUDE_IDLE, CLAUDE_IDLE] } });
+    const r = await open('', { ...w.opts, router: cont('claude', 'S1'), answer: 1 });
+    check('只答题（无正文）→ answered，不 write', r.action === 'answered' && r.option === 1 && w.calls.write.length === 0, JSON.stringify(r));
+  }
+  {
+    // 按了选项但屏幕不动：failed + 剪贴板
+    const w = world({ ...baseA, tails: { V1: CLAUDE_APPROVAL } });
+    const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1'), answer: 1, answerWaitMs: 700 });
+    check('按键没生效 → failed + 剪贴板，不 write', r.action === 'failed' && /仍停在选项框/.test(r.why) && w.calls.write.length === 0 && w.calls.clip[0] === TEXT, JSON.stringify(r));
+  }
+  {
+    // 选完又出现下一个选项框（连着两个工具要批）：不算失败，新框带回入口
+    const NEXT = CLAUDE_APPROVAL.replaceAll('touch approval-probe.txt', 'rm -rf /tmp/other');
+    const w = world({ ...baseA, tails: { V1: [CLAUDE_APPROVAL, NEXT, NEXT] } });
+    const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1'), answer: 1, answerWaitMs: 700 });
+    check('连着两个选项框 → 新框带回入口（awaiting-approval），正文在剪贴板', r.action === 'awaiting-approval' && r.prompt.context === 'rm -rf /tmp/other' && w.calls.clip[0] === TEXT, JSON.stringify(r));
+  }
+  {
+    // 想答的时候屏幕已不在选项框（人在终端里处理过）：不按键，正文照常送达
+    const w = world({ ...baseA, tails: { V1: CLAUDE_IDLE } });
+    const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1'), answer: 2 });
+    check('屏幕已离开选项框 → 不按键，正文照常写入（不带 answeredOption）', r.action === 'wrote' && r.answeredOption === undefined && w.calls.press.length === 0 && w.calls.write[0].t === TEXT, JSON.stringify(r));
+    const w3 = world({ ...baseA, tails: { V1: CLAUDE_IDLE } });
+    const r3 = await open('', { ...w3.opts, router: cont('claude', 'S1'), answer: 2 });
+    check('屏幕已离开选项框且无正文 → answered(null)，没按过键', r3.action === 'answered' && r3.option === null && w3.calls.press.length === 0, JSON.stringify(r3));
+  }
+  {
+    // 代答后屏幕停在草稿上：走 focused-only（剪贴板 + 前台），不 write
+    const w = world({ ...baseA, tails: { V1: [CLAUDE_APPROVAL, CLAUDE_DRAFT, CLAUDE_DRAFT] } });
+    const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1'), answer: 1 });
+    check('代答后屏幕有草稿 → focused-only + 前台，不 write', r.action === 'focused-only' && /草稿/.test(r.why) && w.calls.write.length === 0 && w.calls.focus.join() === 'V1', JSON.stringify(r));
+  }
 }
 
 // ---- 8. 失败不丢输入 ----

@@ -66,6 +66,9 @@ export interface SurfaceView {
   title: string;
 }
 
+/** 选项框里能替人按的键（不是文本，不走 bracketed paste） */
+export type KeyPress = 'up' | 'down' | 'enter' | 'esc';
+
 export interface Surface {
   id: SurfaceId;
   listViews(): Promise<SurfaceView[]>;
@@ -75,6 +78,8 @@ export interface Surface {
   openView(cwd: string, argv: string[]): Promise<SurfaceView>;
   /** 把一段文本作为一次输入提交：bracketed paste 包裹正文，再发一个回车 */
   write(viewId: string, text: string): Promise<void>;
+  /** 发送原生按键（选项框的 ↑↓↵），按顺序、不经 bracketed paste */
+  press(viewId: string, keys: KeyPress[]): Promise<void>;
   /** 读屏幕末尾若干行，用于写入前核对是否停在审批/选择框 */
   screenTail(viewId: string, lines: number): Promise<string>;
 }
@@ -112,10 +117,44 @@ export interface Router {
   route(text: string, ctx: RouteContext): Promise<RouteDecision & { latencyMs: number; costUsd: number | null; model: string | null }>;
 }
 
+/** 选项框（审批/选择）的屏幕解析结果；question/context 都取不到就是 null，不编造。 */
+export interface PromptInfo {
+  /** 问的是什么，如 "Do you want to proceed?" */
+  question: string | null;
+  /** 问题紧挨着的上文，如被审批的命令 "$ touch x"；没有就是 null */
+  context: string | null;
+  options: Array<{ label: string }>;
+}
+
 /** open() 实际做了什么；每一种结果都能从原生侧复核。 */
 export type OpenOutcome =
-  | { action: 'wrote'; viewId: string; provider: ProviderId; sessionId: string }
+  | {
+      action: 'wrote';
+      viewId: string;
+      provider: ProviderId;
+      sessionId: string;
+      /** 送达前替人选了选项框的第几项（1 起）；直接写入时没有 */
+      answeredOption?: number;
+    }
   | { action: 'focused-only'; viewId: string; provider: ProviderId; sessionId: string; why: string }
+  | {
+      /** 目标停在审批/选择框：正文没送，由入口里选，选完自动送达（2026-10-25 用户确认） */
+      action: 'awaiting-approval';
+      viewId: string;
+      provider: ProviderId;
+      sessionId: string;
+      prompt: PromptInfo;
+      why: string;
+    }
+  | {
+      /** 只替人选了选项（没有要送达的正文） */
+      action: 'answered';
+      viewId: string;
+      provider: ProviderId;
+      sessionId: string;
+      /** 选的第几项；屏幕已不在选项框、没按任何键时是 null */
+      option: number | null;
+    }
   | {
       action: 'opened';
       viewId: string;

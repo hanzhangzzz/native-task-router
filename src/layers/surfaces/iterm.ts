@@ -211,6 +211,20 @@ end run`, [viewId, pasteBody(text)]);
     if (r !== 'ok') throw new Error(`iTerm 视图不存在: ${viewId}`);
   },
 
+  /** 选项框的按键（↑↓↵Esc）：不是文本，不走 bracketed paste；字节经同一通道原样发出。 */
+  async press(viewId, keys) {
+    await assertRunning();
+    const BYTES = { up: '\u001b[A', down: '\u001b[B', enter: '\r', esc: '\u001b' };
+    const r = await osa(`${FIND}
+on run argv
+  set s to my findSession(item 1 of argv)
+  if s is missing value then return "missing"
+  tell application "iTerm" to tell s to write text (item 2 of argv) newline NO
+  return "ok"
+end run`, [viewId, keys.map((k) => BYTES[k]).join('')]);
+    if (r !== 'ok') throw new Error(`iTerm 视图不存在: ${viewId}`);
+  },
+
   async screenTail(viewId, lines) {
     await assertRunning();
     const out = await osa(`${FIND}
