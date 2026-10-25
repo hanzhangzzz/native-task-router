@@ -340,9 +340,10 @@ ipcMain.on('resize', (_e, h) => {
   const hh = Math.max(48, Math.min(640, Math.round(Number(h) || 0)));
   if (win && win.getContentSize()[1] !== hh) win.setContentSize(WIDTH, hh);
 });
-ipcMain.handle('history', () => new Promise((resolve) => {
-  execFile(process.execPath, [CLI, 'history'], { env: childEnv(), timeout: 30_000, maxBuffer: 4 << 20 }, (_err, stdout) => {
-    try { const a = JSON.parse(stdout.trim().split('\n').pop()); resolve(Array.isArray(a) ? a : []); } catch { resolve([]); }
+// ← 任务列表：终端里开着的会话 + 其余最近会话
+ipcMain.handle('tasks', () => new Promise((resolve) => {
+  execFile(process.execPath, [CLI, 'tasks'], { env: childEnv(), timeout: 30_000, maxBuffer: 8 << 20 }, (_err, stdout) => {
+    try { const o = JSON.parse(stdout.trim().split('\n').pop()); resolve({ running: o.running || [], recent: o.recent || [] }); } catch { resolve({ running: [], recent: [] }); }
   });
 }));
 
@@ -517,7 +518,7 @@ function controlFromStdin() {
     else if (m.cmd === 'hide') hide();
     else if (m.cmd === 'type') await js(`(()=>{const i=document.getElementById('in');i.value=${JSON.stringify(String(m.text))};i.setSelectionRange(i.value.length,i.value.length);i.dispatchEvent(new Event('input'));})()`);
     else if (m.cmd === 'enter') await js(`document.getElementById('in').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))`);
-    else if (m.cmd === 'key') await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(String(m.key))},shiftKey:${!!m.shift}}))`);
+    else if (m.cmd === 'key') await js(`window.dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(String(m.key))},shiftKey:${!!m.shift},metaKey:${!!m.meta}}))`);
     else if (m.cmd === 'caret') await js(`(()=>{const i=document.getElementById('in');i.setSelectionRange(${Number(m.at) || 0},${Number(m.at) || 0});})()`);
     else if (m.cmd === 'js') trace({ ev: 'js', tag: m.tag ?? null, result: await js(String(m.code), target(m)) });
     else if (m.cmd === 'probe') trace({ ev: 'probe', tag: m.tag ?? null, ...(await js('window.__ntrProbe()')), window: win.getContentSize() });

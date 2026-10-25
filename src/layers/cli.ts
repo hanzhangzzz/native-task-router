@@ -50,7 +50,7 @@ function flag(args: string[], name: string): string | undefined {
 }
 
 function brief(c: SessionCard) {
-  return { provider: c.provider, sessionId: c.sessionId, title: c.title, project: c.cwd.split('/').pop(), cwd: c.cwd, last: c.recentPrompts.at(-1)?.slice(0, 80) ?? null, updatedAt: c.updatedAt };
+  return { provider: c.provider, sessionId: c.sessionId, title: c.title, project: c.cwd.split('/').pop(), cwd: c.cwd, last: c.recentPrompts.at(-1)?.slice(0, 80) ?? null, reply: c.lastReply?.slice(0, 160) ?? null, updatedAt: c.updatedAt };
 }
 
 async function main(): Promise<number> {
@@ -96,6 +96,30 @@ async function main(): Promise<number> {
     console.log(JSON.stringify(items));
     return 0;
   }
+  if (cmd === 'tasks') {
+    // 入口按 ← 展开的任务列表（一行 JSON）：running = 终端里开着的会话，按终端里窗口、标签页的顺序；
+    // recent = 其余会话，按最近活动，最多 --limit 条（默认 60，入口里打字筛选用）
+    const [cards, live, views] = await Promise.all([
+      Promise.all(providers.map((p) => p.listSessions())).then((a) => a.flat()),
+      Promise.all(providers.map((p) => p.liveSessions())).then((a) => a.flat()),
+      terminals().listViews(),
+    ]);
+    const card = (p: ProviderId, id: string) => cards.find((c) => c.provider === p && c.sessionId === id);
+    const running = views.flatMap((v, i) => {
+      const here = live.filter((l) => l.tty && l.tty === v.tty);
+      if (here.length !== 1) return []; // 同一终端多个会话：认不准，不列
+      const l = here[0]!, c = card(l.provider, l.sessionId);
+      return [{ provider: l.provider, sessionId: l.sessionId, state: l.state, viewId: v.viewId, order: i, viewTitle: v.title, card: c ? brief(c) : null }];
+    });
+    const open = new Set(running.map((r) => `${r.provider}:${r.sessionId}`));
+    const recent = cards
+      .filter((c) => !open.has(`${c.provider}:${c.sessionId}`))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .slice(0, Number(flag(args, '--limit') ?? 60))
+      .map((c) => ({ provider: c.provider, sessionId: c.sessionId, card: brief(c) }));
+    console.log(JSON.stringify({ running, recent }));
+    return 0;
+  }
   if (cmd === 'live') {
     const live = (await Promise.all(providers.map((p) => p.liveSessions()))).flat();
     const views = await terminals().listViews();
@@ -103,7 +127,7 @@ async function main(): Promise<number> {
     return 0;
   }
   if (cmd !== 'open') {
-    console.error('用法: ntr open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history');
+    console.error('用法: ntr open "<一句话>" [--json] [--pick claude:<id>] [--new claude|codex [--cwd <目录>]] [--focused-tty /dev/ttysN] | route "<一句话>"（只判断不送达） | sessions | live | history | tasks');
     return 2;
   }
 

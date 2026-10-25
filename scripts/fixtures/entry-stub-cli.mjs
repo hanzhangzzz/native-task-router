@@ -2,7 +2,20 @@
 import fs from 'node:fs';
 const args = process.argv.slice(2);
 fs.appendFileSync(process.env.NTR_STUB_LOG, JSON.stringify(args) + '\n');
-const card = (title, project, last) => ({ title, project, cwd: `/tmp/${project}`, last });
+const card = (title, project, last, reply = null) => ({ title, project, cwd: `/tmp/${project}`, last, reply, updatedAt: '2026-10-20T00:00:00Z' });
+if (args[0] === 'tasks') {
+  console.log(JSON.stringify({
+    running: [
+      { provider: 'claude', sessionId: 'H1', state: 'idle', viewId: 'V1', order: 0, card: card('数据库迁移', 'billing', '迁移要能重跑', '迁移脚本已改成可重入，测试全过。') },
+      { provider: 'codex', sessionId: 'H3', state: 'busy', viewId: 'V3', order: 2, card: card('前端打包优化', 'web', '把首屏包拆小', '正在分析 bundle 体积…') },
+    ],
+    recent: [
+      { provider: 'codex', sessionId: 'H2', card: card('API 限流改造', 'shop-api', '按用户维度限流') },
+      { provider: 'claude', sessionId: 'H4', card: card('支付回调排查', 'billing', '回调偶尔重复') },
+    ],
+  }));
+  process.exit(0);
+}
 if (args[0] === 'history') {
   console.log(JSON.stringify([
     { provider: 'claude', sessionId: 'H1', lastInput: '把迁移脚本改成可重入', ts: 2, card: card('数据库迁移', 'billing', '迁移要能重跑') },

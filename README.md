@@ -17,7 +17,7 @@ Before   You remember "the rate-limit work isn't done"
          → scroll a long session list, find it, type your message
 
 Now      ⌃⌥Space → "add a per-user quota to the rate limiter" → Enter
-         → if that session is open, switch to its tab (iTerm or Terminal) and type it there
+         → if that session is open, type it into its tab (iTerm or Terminal) without switching you there; if it's mid-task, the tool queues it after the current turn
          → if not, open a new tab (a new window in Terminal) and resume it natively, full context intact
          → if it's less sure, fork that session into a new one that carries the context, leaving the original untouched
 ```
@@ -86,7 +86,7 @@ scripts/login-item.sh install            # optional: start at login; `uninstall`
 | --- | --- |
 | Enter / Shift+Enter | Send / new line (the box grows with your text) |
 | ↑ ↓ + Enter | Pick a candidate when routing is unsure; 1–9 picks directly, N starts new |
-| ← (caret at start) | List sessions you've sent to before; picking one sends there **deterministically**, skipping the routing step |
+| ← (caret at start) | Open the task list: tasks open in your terminal first (in tab order, with their status and the agent's last reply), then other recent sessions. Type to filter, press a digit to pick, ⌘N to start a new one in that project. Picking one sends there **deterministically**, skipping the routing step |
 | Esc | Close; anything you haven't sent is still there next time |
 
 The input box follows your macOS language (English or Chinese); set `NTR_LANG=en` or `zh` to force one.
@@ -132,10 +132,10 @@ sentence ─▶ local session index ─▶ group by project, list recent threads
   - **Other automatic continuations, forked**: still sent automatically, but the original session is never touched. It forks that session into a new one (`claude -r <id> --fork-session` / `codex fork <id>`) that carries all of its context and receives the sentence in a new tab. The original session's history file doesn't change by a single byte, even if it is open in a terminal right now. One routing note goes in front of the text: the message was delivered automatically, with this confidence, and if it is unrelated to the project or session, the agent should say so and stop without changing any files.
   - **A new thread, started automatically only when most confident**: only with project ≥ 0.95 does it start a new session in that project directory (or a new directory if it belongs to no project), with no fork; the new session also starts with a note: this message was started automatically in project X, and if it doesn't belong there, the agent should say so and stop. Below 0.95 you confirm, with "new session in project X" preselected, so Enter does it. A new session has neither an original session to protect by forking nor an existing thread to anchor it, so it gets the same bar as direct delivery.
   - **Not confident enough, you confirm**: it lists the model's top projects, each with its best thread there or a new one, with the first preselected, so Enter sends it.
-  - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← history, the candidate list, new) is always delivered directly, without a note.
+  - Model errors and timeouts never auto-send. Whatever you pick by hand in the entry (← task list, the candidate list, new) is always delivered directly, without a note.
   - Why a forked tier: a wrong send writes the sentence and the agent's reply into the wrong session's native history, and that can't be undone. "Type it but don't press Enter until you confirm" would mean watching the terminal. Forking lets this band go out automatically without dirtying any existing session. A wrong thread in the forked tier doesn't dirty the original session; the cost is that the new session lacks the context you meant to continue.
 - **Short follow-ups skip the model**: for contentless messages like "continue" or "ok", if you sent something from the entry within the last 5 minutes, it continues that session; otherwise it asks you, with the session you were looking at first and the other open sessions after it by recency. This path takes tens of milliseconds.
-- **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, that the session is idle, and that the screen shows no approval prompt and no half-typed draft of yours. If any check fails, it only switches to the tab and copies your sentence to the clipboard. It never starts a second process on a session that is already running.
+- **Checks right before delivery**: before typing into an open tab, it re-verifies that the tab still maps to the same process and session, and that the screen shows no approval prompt (Enter would confirm its default option) and no half-typed draft of yours. A session that's busy is fine: Claude Code and Codex queue the message after the current turn. After typing it in, you stay where you are; only if a check fails does it switch to the tab and copy your sentence to the clipboard. It never starts a second process on a session that is already running.
 - **Which terminal a new session opens in**: the one you were looking at when you opened the input box; otherwise the one that is running (iTerm if both are); if neither is running, iTerm, or Terminal when iTerm isn't installed. Set `NTR_TERMINAL=iterm` or `NTR_TERMINAL=terminal` to pin it.
 - **Terminal opens a new window**: Terminal's scripting interface can only open windows; a tab would need simulated keystrokes that steal focus, so it doesn't. If Terminal isn't running, it is started without an extra blank window and brought to the front once the window is ready, the same as a cold-started iTerm. If Terminal is already running, it doesn't steal focus.
 - **iTerm not running**: it starts iTerm first; if iTerm opens its own blank window on launch, the session goes into that window instead of leaving an empty tab behind.
@@ -188,7 +188,7 @@ You can also implement the [`Router`](src/layers/types.ts) interface yourself. O
 
 ## Data and privacy
 
-- **Stays on your Mac**: the session index cache and the entry log live in `~/.ntr/` (`cache/` is safe to delete; `entry-log.jsonl` feeds the ← history list; before 0.3 the directory was `~/.jev/` and is renamed as-is on first launch). Native history is never modified.
+- **Stays on your Mac**: the session index cache and the entry log live in `~/.ntr/` (`cache/` is safe to delete; `entry-log.jsonl` records what you sent from the entry, which the router uses to understand short follow-ups like "continue"; before 0.3 the directory was `~/.jev/` and is renamed as-is on first launch). Native history is never modified.
 - A forked delivery adds one more session file to the native directories (`~/.claude/projects` for Claude Code, `~/.codex/sessions` for Codex). It holds a copy of the original session plus the new message with its routing note; the original file is unchanged. Delete forks you don't need like any other session.
 - **Leaves your Mac**: for each decision, bounded snippets of candidate sessions (per card, the title, first message, and last two messages at about 120–160 characters each, plus a reply snippet) and your sentence go to Anthropic through your local `claude -p`. With the OpenRouter backend, they go to OpenRouter and the provider it routes to, with no data retention or training requested. Credentials shaped like `sk-…`, `ghp_…`, `AKIA…`, or `token=…` are masked first. Full conversations are never sent.
 - Once delivered, your message is handled by native Claude Code / Codex as usual.
