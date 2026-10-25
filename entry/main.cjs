@@ -39,6 +39,7 @@ const T = {
   zh: {
     untitled: '(无标题)', noOutput: '无输出', wrote: (p, l) => `已送达 ${p}：${l}`, focused: (l, why) => `只聚焦 ${l}：${why}`,
     opened: (p, cwd) => `已新开 ${p}：${cwd}`, forked: (l, c) => `已分叉续接 ${l} · 置信度 ${c}`, failed: (why) => `失败：${why}`,
+    apWaiting: (q) => `任务在等批准${q ? `：${q}` : '，回到入口选一下'}`, apThen: (n) => `（先选了选项 ${n}）`, apDone: (n) => `已选选项 ${n}`, apGone: '屏幕已不在选项框，没有按键',
     trayShow: (k) => `唤起输入框（${k}）`, trayHotkey: '修改快捷键…', trayLogin: '开机自动启动', trayQuit: '退出', hotkeyTitle: '修改快捷键',
     upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
     upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
@@ -54,6 +55,7 @@ const T = {
     untitled: '(untitled)', noOutput: 'no output', wrote: (p, l) => `Sent to ${p}: ${l}`,
     focused: (l) => `Switched to ${l} but didn't type into it (busy, waiting for approval, or has a draft). Your text is on the clipboard.`,
     opened: (p, cwd) => `Opened ${p} in a new tab: ${cwd}`, forked: (l, c) => `Forked and continued ${l} · confidence ${c}`, failed: (why) => `Failed: ${why}`,
+    apWaiting: (q) => `A task is waiting for your approval${q ? `: ${q}` : '. Pick an option in the input box.'}`, apThen: (n) => ` (approved option ${n} first)`, apDone: (n) => `Selected option ${n}`, apGone: 'The prompt was already handled; no key was sent',
     trayShow: (k) => `Open input box (${k})`, trayHotkey: 'Change hotkey…', trayLogin: 'Open at login', trayQuit: 'Quit', hotkeyTitle: 'Change hotkey',
     upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
     upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
@@ -268,7 +270,9 @@ ipcMain.handle('set-wake', (_e, w) => {
 const label = (o, card = o.card, id = o.sessionId) => (card ? `${card.title ?? t().untitled} · ${card.project}` : id);
 function describe(o) {
   switch (o.action) {
-    case 'wrote': return t().wrote(o.provider, label(o));
+    case 'wrote': return t().wrote(o.provider, label(o)) + (o.answeredOption ? t().apThen(o.answeredOption) : '');
+    case 'awaiting-approval': return t().apWaiting(typeof o.prompt?.question === 'string' ? o.prompt.question : '');
+    case 'answered': return o.option == null ? t().apGone : t().apDone(o.option);
     case 'focused-only': return t().focused(label(o), o.why);
     case 'opened':
       // 分叉送达：显示原会话的名字（新会话在新标签页里，原会话未改动）
@@ -315,7 +319,8 @@ async function show() {
 
 const finishLater = (r) => {
   trace({ ev: 'result', action: r.action });
-  if (r.action !== 'clarify') hideTimer = setTimeout(hide, r.action === 'failed' ? 6000 : 1800);
+  // awaiting-approval 与 clarify 一样等人选，不自动收起
+  if (r.action !== 'clarify' && r.action !== 'awaiting-approval') hideTimer = setTimeout(hide, r.action === 'failed' ? 6000 : 1800);
   return r;
 };
 
@@ -332,7 +337,11 @@ ipcMain.on('voice-draft', () => speak(t().voiceDraft));
 ipcMain.handle('pick', async (_e, c) => {
   const prov = c.provider === 'codex' || (!c.provider && process.env.NTR_DEFAULT_PROVIDER === 'codex') ? 'codex' : 'claude';
   const args = ['open', '--json', ...(c.new ? ['--new', prov, ...(c.cwd ? ['--cwd', String(c.cwd)] : [])] : ['--pick', `${c.provider}:${c.sessionId}`])];
-  return finishLater(await runCli([...args, '--', String(c.text)]));
+  // 目标停在选项框：先替人选这一项，选完 CLI 自动把正文发过去（正文可空 = 只答题）
+  if (c.answer) args.push('--answer', String(Math.max(1, Math.min(9, Number(c.answer) || 1))));
+  const text = String(c.text ?? '');
+  if (text) args.push('--', text);
+  return finishLater(await runCli(args));
 });
 ipcMain.on('cancel', hide);
 // 窗口高度跟随内容（多行输入、候选/历史列表），向下长，不超过 640

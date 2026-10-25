@@ -5,7 +5,8 @@
 //   A1 不在这里保证（Router 的阈值负责）；A2 写入前立即重新核对 tty→pid→sessionId、屏幕，
 //      任一不满足绝不 write；已存活的会话绝不再起第二个 resume 进程。
 //      会话正在跑（busy/unknown）照样写：Claude Code 和 Codex 自己会把输入排到当前这一轮之后（2026-10-25 用户确认）；
-//      只有屏幕停在审批/选择框（回车会确认默认选项）或输入行有草稿时不写。
+//      屏幕停在审批/选择框时（回车会确认默认选项）：没带 answer 返回 awaiting-approval 把选项带回入口，
+//      带 answer 替人选完、等框消失后再写；输入行有草稿时不写。
 //   A4 送达后不切到终端：人从统一入口派活，留在原地；只有没写进去（focused-only）才把那个视图带到前台。
 //   A3 任何没送达的路径（focused-only / failed）都把正文放进剪贴板；clarify 把候选原样返回，正文仍在调用方手里。
 //   F  delivery === 'fork' 的续接：绝不写进开着的视图、绝不在原 id 上 resume；一律新开视图执行 forkArgv，
@@ -18,10 +19,12 @@ import { spawn } from 'node:child_process';
 import { ntrHome } from './providers/common.ts';
 import { routingNote, routingNoteNew } from './routing-note.ts';
 import type {
+  KeyPress,
   LiveSession,
   OpenOutcome,
   Provider,
   ProviderId,
+  PromptInfo,
   RouteContext,
   RouteDecision,
   Router,
@@ -46,6 +49,10 @@ export interface OpenOptions {
   windowId?: number;
   /** 唤起入口前前台终端（iTerm 或 Terminal）会话的 tty */
   focusedTty?: string | null;
+  /** 目标停在选项框时替人选第几项（1 起），选完等框消失再送达正文；缺省把选项框原样交给入口 */
+  answer?: number;
+  /** 选完后等屏幕离开选项框的最长毫秒数（默认 6 秒） */
+  answerWaitMs?: number;
   /** 原生"给已有会话排队消息"通道（仅对空闲的存活会话使用，不经按键） */
   queue?: Partial<Record<ProviderId, (sessionId: string, text: string) => Promise<void>>>;
   clipboard?: (text: string) => Promise<void>;
@@ -99,6 +106,59 @@ export function pendingDraft(tail: string): string | null {
     return null;
   }
   return null;
+}
+
+const OPTION_LINE = /^\s*[❯›>]?\s*(\d)\.\s+(\S.*)$/;
+const QUESTIONISH = /(do you want|would you like|proceed\s*\?|to (?:select|confirm|continue)|choose|确认|选择|批准|继续)/i;
+
+/**
+ * 选项框解析（approvalPrompt 为真的屏幕）：末尾连续编号 1..n 的选项行 + 它们上方的问题与上文。
+ * 编号不是从 1 连续排下来的（认不准选项对应关系）时 options 为空，入口只给"确认当前高亮项"。
+ */
+export function parsePrompt(tail: string): PromptInfo {
+  const lines = tail.split('\n');
+  let end = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (OPTION_LINE.test(lines[i]!)) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) return { question: null, context: null, options: [] };
+  const options: Array<{ label: string }> = [];
+  let expect = Number(lines[end]!.match(OPTION_LINE)![1]);
+  let i = end;
+  for (; i >= 0; i--) {
+    const m = lines[i]!.match(OPTION_LINE);
+    if (!m || Number(m[1]) !== expect) break;
+    options.unshift({ label: m[2]!.trim().slice(0, 120) });
+    expect -= 1;
+  }
+  if (options.length === 0 || expect !== 0) return { question: null, context: null, options: [] };
+  // 选项上方：最近的"问题样"行是问题；问题与选项之间（或问题上方最近）的非空行是上文
+  const above: number[] = [];
+  for (let j = i; j >= 0 && above.length < 4; j--) {
+    if (lines[j]!.trim() !== '') above.push(j);
+  }
+  const text = (j: number) => lines[j]!.trim().slice(0, 200);
+  let question: string | null = null;
+  let context: string | null = null;
+  const qi = above.find((j) => QUESTIONISH.test(lines[j]!));
+  if (qi !== undefined) {
+    question = text(qi);
+    const between = above.find((j) => j > qi); // 问题与选项之间：被审批的命令多在这
+    const nextUp = above.find((j) => j < qi);
+    context = between !== undefined ? text(between) : nextUp !== undefined ? text(nextUp) : null;
+  } else if (above.length) {
+    question = text(above[0]!);
+    context = above[1] !== undefined ? text(above[1]!) : null;
+  }
+  return { question, context, options };
+}
+
+/** 替人选第 option 项要按的键：光标在 1 上，↓ 到第 n 项再回车。 */
+export function answerKeys(option: number): KeyPress[] {
+  return [...Array(Math.max(0, option - 1)).fill('down'), 'enter'] as KeyPress[];
 }
 
 export { ntrHome };
@@ -317,18 +377,30 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       return finish({ action: 'opened', viewId: view.viewId, ...target, cwd: card.cwd });
     }
 
-    // 已存活：绝不二开。以下只可能 write / queue / focused-only / failed
+    // 已存活：绝不二开。以下只可能 write / queue / awaiting-approval / answered / focused-only / failed
     if (holders.length > 1) return await failed(`会话 ${sessionId} 同时被 ${holders.length} 个进程持有，无法确定写哪个`);
     const holder = holders[0]!;
     const views = holder.tty ? (await opts.surface.listViews()).filter((v) => v.tty === holder.tty) : [];
     const view = views.length === 1 ? views[0]! : null;
+    /** 屏幕此刻停在选项框时的解析结果；否则 null。 */
+    const screenPrompt = async (): Promise<PromptInfo | null> => {
+      if (!view) return null;
+      const tail = await opts.surface.screenTail(view.viewId, SCREEN_TAIL_LINES);
+      return approvalPrompt(tail) ? parsePrompt(tail) : null;
+    };
 
     // Codex 空闲：走原生 queue 通道，不依赖视图/按键，也不会碰到输入行里的草稿
-    // （忙时不用它：排进去的消息会随取消这一轮丢失；忙时按键写入，由 Codex 界面自己排队）
+    // （忙时不用它：排进去的消息会随取消这一轮丢失；忙时按键写入，由 Codex 界面自己排队）。
+    // 屏幕停在选项框时也绝不 queue：Codex 停在审批框时状态正是 idle（上一轮已 task_complete），
+    // 队列里的消息会随"取消"整个丢掉，所以先看屏幕，是选项框就交给下面的审批分支。
     const queue = opts.queue?.[provider.id];
+    let promptInfo: PromptInfo | null = null;
     if (queue && holder.state === 'idle') {
-      await queue(sessionId, text);
-      return finish({ action: 'wrote', viewId: view?.viewId ?? '', ...target });
+      promptInfo = await screenPrompt();
+      if (!promptInfo) {
+        await queue(sessionId, text);
+        return finish({ action: 'wrote', viewId: view?.viewId ?? '', ...target });
+      }
     }
 
     if (!view) {
@@ -340,6 +412,34 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       return await failed(why);
     }
 
+    // 审批分支（2026-10-25 用户确认的第二期）：屏幕停在选项框时，没带 answer 就把选项带回入口选；
+    // 带了就替人按 ↓×(n-1)+↵，等屏幕离开选项框（连着的下一个选项框原样带回入口）再走普通送达闸门。
+    promptInfo ??= await screenPrompt();
+    let pressed = false;
+    if (promptInfo) {
+      if (opts.answer == null) {
+        const why = await keep('屏幕停在审批/选择框');
+        return finish({ action: 'awaiting-approval', viewId: view.viewId, ...target, prompt: promptInfo, why });
+      }
+      await opts.surface.press(view.viewId, answerKeys(opts.answer));
+      pressed = true;
+      const deadline = Date.now() + (opts.answerWaitMs ?? 6000);
+      for (;;) {
+        await sleep(320);
+        const now = await opts.surface.screenTail(view.viewId, SCREEN_TAIL_LINES);
+        if (!approvalPrompt(now)) break;
+        if (Date.now() >= deadline) {
+          if (JSON.stringify(parsePrompt(now)) !== JSON.stringify(promptInfo)) {
+            const why = await keep('选项后面又出现一个选项框');
+            return finish({ action: 'awaiting-approval', viewId: view.viewId, ...target, prompt: parsePrompt(now), why });
+          }
+          return await failed(`选了选项 ${opts.answer}，屏幕仍停在选项框（按键没有生效？）`);
+        }
+      }
+    }
+    if (!text) return finish({ action: 'answered', viewId: view.viewId, ...target, option: pressed ? opts.answer! : null });
+
+    // 普通送达闸门：全部重新取（视图/映射 + 屏幕），选项已答完或本来就没有
     const block = await whyNotWrite(holder, await allLive(), view, opts.surface);
     if (block) {
       const why = await keep(block);
@@ -347,7 +447,7 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       return finish({ action: 'focused-only', viewId: view.viewId, ...target, why });
     }
     await opts.surface.write(view.viewId, text);
-    return finish({ action: 'wrote', viewId: view.viewId, ...target });
+    return finish({ action: 'wrote', viewId: view.viewId, ...target, ...(pressed ? { answeredOption: opts.answer } : {}) });
   } catch (e) {
     return await failed(`open 出错: ${e instanceof Error ? e.message : String(e)}`);
   }

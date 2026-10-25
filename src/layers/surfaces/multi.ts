@@ -69,6 +69,7 @@ export function createMulti(d: MultiDeps): OpenSurface {
     listViews: listAll,
     focus: async (viewId) => { const r = route(viewId); await r.s.focus(r.id); },
     write: async (viewId, text) => { const r = route(viewId); await r.s.write(r.id, text); },
+    press: async (viewId, keys) => { const r = route(viewId); await r.s.press(r.id, keys); },
     screenTail: async (viewId, lines) => { const r = route(viewId); return r.s.screenTail(r.id, lines); },
 
     /** windowId 只对 iTerm 有意义（测试把新 tab 隔离进指定 iTerm 窗口），给了就固定开在 iTerm。 */

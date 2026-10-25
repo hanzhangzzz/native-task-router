@@ -22,6 +22,7 @@ export function guarded(surface: OpenSurface, queue: Queue, file = process.env.N
     surface: {
       ...surface,
       write: async (v, t) => (ownView(v) ? surface.write(v, t) : deny(`write ${v}`)),
+      press: async (v, k) => (ownView(v) ? surface.press(v, k) : deny(`press ${v}`)),
       focus: async (v) => (ownView(v) ? surface.focus(v) : deny(`focus ${v}`)),
       openView: async (cwd, argv, o) => {
         const i = argv.findIndex((a) => a === '-r' || a === 'resume');

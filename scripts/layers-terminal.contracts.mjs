@@ -75,13 +75,14 @@ check('terminal.ts 只有两处脚本 activate：focus 末尾与 openView 冷启
 
 // ---- 5. 组合 Surface：合并、分发、目标选择、单边失败 ----
 function fakeSurface(id, views, { failList = false } = {}) {
-  const calls = { focus: [], write: [], tail: [], open: [] };
+  const calls = { focus: [], write: [], press: [], tail: [], open: [] };
   return {
     calls,
     s: {
       listViews: async () => { if (failList) throw new Error(`${id} -1743`); return views.map((v) => ({ surface: id, title: '', ...v })); },
       focus: async (v) => void calls.focus.push(v),
       write: async (v, t) => void calls.write.push({ v, t }),
+      press: async (v, k) => void calls.press.push({ v, k }),
       screenTail: async (v, n) => (calls.tail.push({ v, n }), `${id}-tail`),
       openView: async (cwd, argv, o) => (calls.open.push({ cwd, argv, o }), { surface: id, viewId: id === 'iterm' ? 'NEW-SESSION' : '/dev/ttys099', tty: '/dev/ttys099', title: '' }),
     },
@@ -99,8 +100,10 @@ function multi({ itermViews = [], termViews = [], running = R(true, true), insta
   check('multi.listViews 合并两边并加前缀', JSON.stringify(vs.map((v) => [v.surface, v.viewId, v.tty])) === JSON.stringify([['iterm', 'iterm:S1', '/dev/ttys001'], ['terminal', 'terminal:/dev/ttys002', '/dev/ttys002']]), JSON.stringify(vs));
   await m.write('terminal:/dev/ttys002', 'hello');
   await m.focus('iterm:S1');
+  await m.press('iterm:S1', ['down', 'down', 'enter']);
   const tail = await m.screenTail('terminal:/dev/ttys002', 7);
   check('multi.write 按前缀分发，去前缀后交给 Terminal', te.write.length === 1 && te.write[0].v === '/dev/ttys002' && te.write[0].t === 'hello' && it.write.length === 0);
+  check('multi.press 按前缀分发按键序列', it.press.length === 1 && JSON.stringify(it.press[0]) === JSON.stringify({ v: 'S1', k: ['down', 'down', 'enter'] }) && te.press.length === 0);
   check('multi.focus 按前缀分发给 iTerm', it.focus.length === 1 && it.focus[0] === 'S1' && te.focus.length === 0);
   check('multi.screenTail 按前缀分发并透传行数', tail === 'terminal-tail' && te.tail[0].v === '/dev/ttys002' && te.tail[0].n === 7);
   check('multi.write 无前缀/未知前缀报错，不落到任何终端', (await throws(() => m.write('S1', 'x'))) && (await throws(() => m.write('kitty:1', 'x'))) && it.write.length === 0 && te.write.length === 1);
@@ -145,8 +148,10 @@ function multi({ itermViews = [], termViews = [], running = R(true, true), insta
   const g = guarded(m, async () => {}, file);
   await g.surface.write('iterm:S1', 'a');
   await g.surface.write('terminal:/dev/ttys002', 'b');
+  await g.surface.press('iterm:S1', ['enter']);
   check('guard: 名单写裸 iTerm id 时放行 iterm:<id>', it.write.length === 1 && it.write[0].v === 'S1');
   check('guard: 名单写带前缀 id 时放行', te.write.length === 1 && te.write[0].v === '/dev/ttys002');
+  check('guard: press 同样按名单把关', it.press.length === 1 && (await throws(() => g.surface.press('iterm:S2', ['enter']))) && it.press.length === 1);
   check('guard: 名单外的视图被拒', (await throws(() => g.surface.write('iterm:S2', 'x'))) && (await throws(() => g.surface.write('terminal:/dev/ttys003', 'x'))) && it.write.length === 1 && te.write.length === 1);
   fs.rmSync(dir, { recursive: true, force: true });
 }
