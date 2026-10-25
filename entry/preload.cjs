@@ -3,7 +3,7 @@ contextBridge.exposeInMainWorld('ntr', {
   submit: (text, viaVoice) => ipcRenderer.invoke('submit', text, !!viaVoice),
   pick: (choice) => ipcRenderer.invoke('pick', choice),
   cancel: () => ipcRenderer.send('cancel'),
-  history: () => ipcRenderer.invoke('history'),
+  tasks: () => ipcRenderer.invoke('tasks'),
   lang: () => ipcRenderer.invoke('lang'),
   getHotkey: () => ipcRenderer.invoke('get-hotkey'),
   setHotkey: (acc) => ipcRenderer.invoke('set-hotkey', acc),

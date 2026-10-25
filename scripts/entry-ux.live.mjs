@@ -37,6 +37,8 @@ const probe = async () => {
 const key = async (k, shift = false) => { send({ cmd: 'key', key: k, shift }); await sleep(150); };
 const waitCalls = async (n) => { for (let i = 0; i < 50; i++) { if (calls().length >= n) return calls(); await sleep(100); } return calls(); };
 const show = async () => { send({ cmd: 'show' }); await sleep(700); };
+let jsN0 = 0;
+const jsMain = async (code) => { const tag = `m${++jsN0}`; send({ cmd: 'js', tag, code }); for (let i = 0; i < 30; i++) { const e = lines(TRACE).find((x) => x.ev === 'js' && x.tag === tag); if (e) return e.result; await sleep(100); } return null; };
 
 try {
   for (let i = 0; i < 100 && !out.includes('ntr 入口就绪'); i++) await sleep(100);
@@ -77,18 +79,26 @@ try {
   check('回车确认当前高亮项（第 2 项 → --pick codex:C2）', JSON.stringify(c1[1]?.slice(0, 4)) === JSON.stringify(['open', '--json', '--pick', 'codex:C2']), JSON.stringify(c1[1]));
   check('候选回车发送的正文是原句', c1[1]?.at(-1) === 'CLARIFY 帮我看一下那个任务');
 
-  // ---- 3. ← 历史会话：空输入时选中 → 成为发送目标，之后打字直接发往它 ----
+  // ---- 3. ← 任务列表：开着的在前（带状态），其余最近的在后；空输入时选中 → 成为发送目标，之后打字直接发往它 ----
   await show();
   await key('ArrowLeft');
   let ph = null;
-  for (let i = 0; i < 30; i++) { await sleep(150); ph = await probe(); if (ph.mode === 'history' && ph.items.length) break; }
-  check('空输入按 ← 展开历史会话', ph.mode === 'history' && JSON.stringify(ph.items) === JSON.stringify(['claude:H1', 'codex:H2']), JSON.stringify(ph));
+  for (let i = 0; i < 30; i++) { await sleep(150); ph = await probe(); if (ph.mode === 'tasks' && ph.items.length) break; }
+  check('空输入按 ← 展开任务列表：开着的在前', ph.mode === 'tasks' && JSON.stringify(ph.items) === JSON.stringify(['claude:H1', 'codex:H3', 'codex:H2', 'claude:H4']), JSON.stringify(ph));
+  send({ cmd: 'shot', file: path.join(D, '3-tasks.png') });
+  // 打字筛选：只剩 billing 的两条，正文不受影响
+  await jsMain(`(()=>{const f=document.getElementById('filter');f.value='billing';f.dispatchEvent(new Event('input'));})()`);
+  let pf = await probe();
+  check('打字筛选 → 只剩匹配的任务', JSON.stringify(pf.items) === JSON.stringify(['claude:H1', 'claude:H4']) && pf.value === '', JSON.stringify(pf));
+  await key('Escape');
+  pf = await probe();
+  check('筛选时 Esc → 先清空筛选，列表还在', pf.mode === 'tasks' && pf.filter === '' && pf.items.length === 4, JSON.stringify(pf));
   await key('ArrowDown');
-  send({ cmd: 'shot', file: path.join(D, '3-history.png') });
+  await key('ArrowDown');
   await sleep(200);
   await key('Enter');
   const pt = await probe();
-  check('选中历史会话 → 成为发送目标，回到输入', pt.mode === 'input' && pt.target === 'codex:H2', JSON.stringify(pt));
+  check('选中最近的任务 → 成为发送目标，回到输入', pt.mode === 'input' && pt.target === 'codex:H2', JSON.stringify(pt));
   send({ cmd: 'shot', file: path.join(D, '4-target.png') });
   send({ cmd: 'type', text: '周末的场次再确认一下' });
   send({ cmd: 'enter' });
@@ -104,19 +114,33 @@ try {
   for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
   await key('Enter');
   const c3 = await waitCalls(4);
-  check('有正文时选历史会话 → 立即发往它', JSON.stringify(c3[3]) === JSON.stringify(['open', '--json', '--pick', 'claude:H1', '--', '接着复盘']), JSON.stringify(c3[3]));
+  check('有正文时选任务 → 立即发往它', JSON.stringify(c3[3]) === JSON.stringify(['open', '--json', '--pick', 'claude:H1', '--', '接着复盘']), JSON.stringify(c3[3]));
+
+  // ---- 4b. ⌘N：在选中任务的项目里新开 ----
+  await show();
+  send({ cmd: 'type', text: '' });
+  await key('ArrowLeft');
+  for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
+  send({ cmd: 'key', key: 'n', meta: true });
+  await sleep(200);
+  const pn = await probe();
+  check('⌘N → 目标是在该项目新建', pn.mode === 'input' && pn.target === 'new:claude:/tmp/billing', JSON.stringify(pn));
+  send({ cmd: 'type', text: '新开一个任务' });
+  send({ cmd: 'enter' });
+  const cn = await waitCalls(5);
+  check('⌘N 后回车 → --new claude --cwd 该项目', JSON.stringify(cn[4]) === JSON.stringify(['open', '--json', '--new', 'claude', '--cwd', '/tmp/billing', '--', '新开一个任务']), JSON.stringify(cn[4]));
 
   // ---- 5. ← 只在光标位于开头时触发；Esc 层层退出 ----
   await show();
   send({ cmd: 'type', text: 'abc' });
   await sleep(150);
   await key('ArrowLeft');
-  check('光标不在开头时 ← 不展开历史', (await probe()).mode === 'input');
+  check('光标不在开头时 ← 不展开任务列表', (await probe()).mode === 'input');
   send({ cmd: 'type', text: '' });
   await key('ArrowLeft');
   for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
   await key('Escape');
-  check('历史列表里 Esc → 回到输入', (await probe()).mode === 'input');
+  check('任务列表里 Esc → 回到输入', (await probe()).mode === 'input');
   await key('ArrowLeft');
   for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
   await key('Enter');
@@ -126,8 +150,8 @@ try {
   check('有目标时 Esc → 取消目标，改由 Jev 判断', pe.target === null && pe.mode === 'input');
   send({ cmd: 'type', text: '普通一句' });
   send({ cmd: 'enter' });
-  const c4 = await waitCalls(5);
-  check('取消目标后回车走路由（无 --pick）', JSON.stringify(c4[4]) === JSON.stringify(['open', '--json', '--', '普通一句']), JSON.stringify(c4[4]));
+  const c4 = await waitCalls(6);
+  check('取消目标后回车走路由（无 --pick）', JSON.stringify(c4[5]) === JSON.stringify(['open', '--json', '--', '普通一句']), JSON.stringify(c4[5]));
 
   // ---- 6. 关闭再打开：没送出去的话保留 ----
   const hideShow = async () => { send({ cmd: 'hide' }); await sleep(300); await show(); return probe(); };

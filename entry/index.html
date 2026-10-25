@@ -40,6 +40,18 @@
   #list li + li { margin-top: 2px; }
   #list li .sub { color: var(--dim); font-size: 12px; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #list li.sel { background: var(--sel); }
+  #list li.sel .sub.more { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  #list li.sec { padding: 6px 12px 2px 14px; font-size: 11.5px; color: var(--faint); letter-spacing: .5px; }
+  #list li .top { display: flex; gap: 8px; align-items: baseline; }
+  #list li .top .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #list li .st { flex: none; font-size: 11.5px; color: var(--dim); }
+  #list li .st::before { content: '●'; margin-right: 4px; font-size: 9px; vertical-align: 1px; }
+  #list li .st.idle::before { color: #4cd38a; } #list li .st.busy::before { color: var(--accent2); } #list li .st.waiting::before { color: #ffb347; } #list li .st.unknown::before { color: var(--faint); }
+  #list.scroll { max-height: 430px; overflow-y: auto; }
+  #filter { display: block; width: 100%; box-sizing: border-box; margin: 10px 0 0; padding: 5px 10px; border: 0; outline: 0; border-radius: 7px;
+    background: var(--row); color: inherit; font: inherit; font-size: 13px; caret-color: var(--accent); }
+  #filter[hidden] { display: none; }
+  #filter::placeholder { color: var(--faint); }
   #list li.sel::before { content: ''; position: absolute; left: 4px; top: 9px; bottom: 9px; width: 3px; border-radius: 2px; background: var(--accent); }
   #hint { margin: 10px 0 0; color: var(--faint); font-size: 11.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
   #hint:empty { display: none; }
@@ -49,30 +61,34 @@
   <div id="target" hidden></div>
   <div class="row"><span class="mark">›_</span><textarea id="in" rows="1" autofocus autocomplete="off" spellcheck="false"></textarea></div>
   <div id="msg"></div>
+  <input id="filter" hidden autocomplete="off" spellcheck="false">
   <ul id="list"></ul>
   <div id="hint"></div>
 </div>
 <script>
   const $ = (id) => document.getElementById(id);
-  const input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box');
+  const input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box'), filter = $('filter');
   const MAX_INPUT_PX = 220;
   // 界面文案：语言由主进程决定（NTR_LANG 或 macOS 首选语言）；路由原因按已知文本翻译，未知的不显示原文
   const I18N = {
     zh: {
-      placeholder: '说一句话，回车发送 · Shift+回车换行 · ← 历史会话', untitled: '(无标题)',
+      placeholder: '说一句话，回车发送 · Shift+回车换行 · ← 任务列表', untitled: '(无标题)',
       newItem: (p, dir) => `新建 ${p} 会话 · ${dir || '新目录'}`, last: '上次：', recent: '最近：',
       chooseKeys: [['↑↓', '选择'], ['↵', '确认'], ['1–9', '直选'], ['N', '新建'], ['Esc', '取消']],
-      historyKeys: (hasText) => [['↑↓', '选择'], ['↵', hasText ? '直接发往该会话' : '设为发送目标'], ['→ / Esc', '返回']],
+      taskKeys: (hasText) => [['↑↓ 1–9', '选择'], ['↵', hasText ? '发给它' : '设为发送目标'], ['⌘N', '在该项目新开'], ['Esc', '返回']],
       to: '→ 发往 ', escCancel: 'Esc 取消', notSent: (r) => `没有自动发送：${r}`, unsure: '拿不准，选一个去处：',
-      routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingHistory: '读取历史会话…', noHistory: '还没有发送过的会话',
+      routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingTasks: '读取任务…', noTasks: '没有找到会话',
+      secRunning: (n) => `正在运行 · ${n}`, secRecent: '最近', filterPh: '打字筛选项目、标题…', noMatch: '没有匹配的任务',
+      state: { idle: '空闲', busy: '运行中', waiting: '等待中', unknown: '状态未知' }, it: '它：', you: '你：',
+      ago: (m) => (m < 60 ? `${Math.max(1, m)} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`),
       vListening: '🎙 在听，说你要派的活…', vCountdown: (n) => `🎙 ${n} 秒后发送 · 任意键修改 · Esc 取消`,
       vDraft: '🎙 框里原有没发出去的话，语音这句接在后面，不自动发送', vTimeout: '🎙 没听到',
     },
     en: {
-      placeholder: 'Say one sentence · ↵ send · ⇧↵ newline · ← history', untitled: '(untitled)',
+      placeholder: 'Say one sentence · ↵ send · ⇧↵ newline · ← tasks', untitled: '(untitled)',
       newItem: (p, dir) => `New ${p} session · ${dir || 'new folder'}`, last: 'Last: ', recent: 'Recent: ',
       chooseKeys: [['↑↓', 'select'], ['↵', 'send'], ['1–9', 'pick'], ['N', 'new'], ['Esc', 'cancel']],
-      historyKeys: (hasText) => [['↑↓', 'select'], ['↵', hasText ? 'send to it' : 'set as target'], ['→ / Esc', 'back']],
+      taskKeys: (hasText) => [['↑↓ 1–9', 'select'], ['↵', hasText ? 'send to it' : 'set as target'], ['⌘N', 'new in this project'], ['Esc', 'back']],
       to: '→ to ', escCancel: 'Esc cancel',
       notSent: (r) => `Not sent automatically: ${{
         '输入太短或没有具体内容，无法确定去处': 'too short to tell where it goes',
@@ -82,7 +98,10 @@
         '置信度低于阈值': 'confidence below the threshold',
       }[r] || 'not sure where it goes'}. Pick one:`,
       unsure: 'Not sure where this goes. Pick one:',
-      routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingHistory: 'Loading past sessions…', noHistory: 'No past sessions yet',
+      routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingTasks: 'Loading tasks…', noTasks: 'No sessions found',
+      secRunning: (n) => `Running · ${n}`, secRecent: 'Recent', filterPh: 'Type to filter by project or title…', noMatch: 'No matching tasks',
+      state: { idle: 'idle', busy: 'working', waiting: 'waiting', unknown: 'unknown' }, it: 'Agent: ', you: 'You: ',
+      ago: (m) => (m < 60 ? `${Math.max(1, m)}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`),
       vListening: '🎙 Listening. Say your task…', vCountdown: (n) => `🎙 Sending in ${n}s · any key to edit · Esc to cancel`,
       vDraft: "🎙 The box already had an unsent message; this was added after it and won't send by itself", vTimeout: "🎙 Didn't hear anything",
     },
@@ -91,8 +110,11 @@
   input.placeholder = '';
   window.ntr.lang().then((l) => { S = I18N[l] || I18N.zh; input.placeholder = S.placeholder; render(); });
 
-  // mode: input（打字）| busy（等待结果）| choose（拿不准，选去处）| history（← 历史会话）
+  // mode: input（打字）| busy（等待结果）| choose（拿不准，选去处）| tasks（← 任务列表）
   let mode = 'input', items = [], sel = 0, text = '', target = null;
+  // 任务列表：running = 终端里开着的（按标签页顺序），recent = 其余最近的；items 是按筛选词过滤后可选的行
+  let tasks = { running: [], recent: [] };
+  const RECENT_SHOWN = 8; // 不筛选时"最近"只列这么多，筛选时在全部里找
   // inflight：请求已交给 CLI、结果未回；lastAction：上一次结果（决定再次唤起时是否恢复正文）
   let inflight = false, lastAction = null;
 
@@ -106,18 +128,68 @@
     reportSize();
   };
   const sessionLabel = (it) => {
+    if (it.kind === 'new') return S.newItem(it.provider, it.cwd ? it.cwd.split('/').pop() : '');
     const c = it.card;
-    const title = c ? (c.title || c.last || S.untitled) : it.provider + ':' + it.sessionId;
+    const title = c ? (c.title || c.last || S.untitled) : (it.viewTitle || it.provider + ':' + it.sessionId);
     return `${title} · ${c ? c.project : ''} · ${it.provider}`;
   };
+  // 回复多是 Markdown：列表里只要文字，去掉标题井号、加粗星号、行内代码的反引号
+  const oneLine = (s) => String(s || '').replace(/^#+\s*/gm, '').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim();
+  const minutesAgo = (iso) => Math.round((Date.now() - Date.parse(iso)) / 60000);
+  // 开着的任务看它最后说了什么（进行到哪了）；没开着的看你上次说了什么、多久以前
+  const taskSub = (it) => {
+    const c = it.card;
+    if (!c) return '';
+    if (it.state) return c.reply ? S.it + oneLine(c.reply) : (c.last ? S.you + oneLine(c.last) : '');
+    return [c.last ? S.you + oneLine(c.last) : '', c.updatedAt ? S.ago(minutesAgo(c.updatedAt)) : ''].filter(Boolean).join(' · ');
+  };
+  const taskText = (it) => [it.card && it.card.title, it.card && it.card.project, it.card && it.card.last, it.viewTitle, it.provider].filter(Boolean).join(' ').toLowerCase();
+  function filterTasks() {
+    const q = filter.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (it) => q.every((w) => taskText(it).includes(w));
+    const run = tasks.running.filter(hit);
+    const rec = tasks.recent.filter(hit).slice(0, q.length ? 30 : RECENT_SHOWN);
+    items = [...run, ...rec]; sel = Math.min(sel, Math.max(0, items.length - 1));
+  }
   const itemHtml = (it) => {
     if (it.kind === 'new') return { main: S.newItem(it.provider, it.cwd ? it.cwd.split('/').pop() : ''), sub: '' };
     return { main: sessionLabel(it), sub: it.lastInput ? S.last + it.lastInput : (it.card && it.card.last ? S.recent + it.card.last : '') };
   };
 
+  function renderTasks() {
+    let sec = null;
+    items.forEach((it, i) => {
+      const s = it.state ? 'run' : 'rec';
+      if (s !== sec) {
+        sec = s;
+        const h = document.createElement('li'); h.className = 'sec';
+        h.textContent = s === 'run' ? S.secRunning(items.filter((x) => x.state).length) : S.secRecent;
+        list.appendChild(h);
+      }
+      const li = document.createElement('li');
+      if (i === sel) li.className = 'sel';
+      const top = document.createElement('div'); top.className = 'top';
+      const t = document.createElement('span'); t.className = 't'; t.textContent = `${i < 9 ? i + 1 + '. ' : ''}${sessionLabel(it)}`; top.appendChild(t);
+      if (it.state) { const st = document.createElement('span'); st.className = 'st ' + it.state; st.textContent = S.state[it.state] || it.state; top.appendChild(st); }
+      li.appendChild(top);
+      const sub = taskSub(it);
+      if (sub) { const b = document.createElement('div'); b.className = 'sub more'; b.textContent = sub; li.appendChild(b); }
+      list.appendChild(li);
+    });
+    if (!items.length) { const li = document.createElement('li'); li.className = 'sec'; li.textContent = S.noMatch; list.appendChild(li); }
+    list.classList.add('scroll');
+    const selEl = list.querySelector('li.sel');
+    if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+  }
+
   function render() {
     list.textContent = '';
-    if (mode === 'choose' || mode === 'history') {
+    list.classList.remove('scroll');
+    filter.hidden = mode !== 'tasks';
+    if (mode === 'tasks') {
+      renderTasks();
+      hint.innerHTML = S.taskKeys(!!input.value.trim()).map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
+    } else if (mode === 'choose') {
       items.forEach((it, i) => {
         const li = document.createElement('li');
         if (i === sel) li.className = 'sel';
@@ -126,8 +198,7 @@
         if (sub) { const b = document.createElement('div'); b.className = 'sub'; b.textContent = sub; li.appendChild(b); }
         list.appendChild(li);
       });
-      const keys = mode === 'choose' ? S.chooseKeys : S.historyKeys(!!input.value.trim());
-      hint.innerHTML = keys.map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
+      hint.innerHTML = S.chooseKeys.map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
     } else {
       hint.textContent = '';
     }
@@ -154,14 +225,14 @@
   // 请求还在路上时不动界面，结果回来照常显示（拿不准的候选不能因为重开窗口而丢掉）。
   function onShow() {
     if (inflight) return void reportSize();
-    if (mode === 'input' || mode === 'history') return backToInput();
+    if (mode === 'input' || mode === 'tasks') return backToInput();
     if (mode === 'choose' || lastAction === 'failed') return backToInput(text);
     reset();
   }
   window.ntr.onShow(onShow);
   // 语音入口拿不准去处时主进程调用：框里没有没发出去的话才放进去（两件事拼成一句会送错），返回是否放下
   window.__ntrPrefill = (t) => {
-    const unsent = mode === 'input' || mode === 'history' ? !!input.value.trim() : mode === 'choose' || inflight || lastAction === 'failed';
+    const unsent = mode === 'input' || mode === 'tasks' ? !!input.value.trim() : mode === 'choose' || inflight || lastAction === 'failed';
     if (unsent) return false;
     backToInput(t);
     return true;
@@ -232,7 +303,8 @@
     text = input.value.trim();
     if (!text) return;
     say(S.routing);
-    if (target) run(window.ntr.pick({ text, provider: target.provider, sessionId: target.sessionId }));
+    if (target && target.kind === 'new') run(window.ntr.pick({ text, new: true, provider: target.provider, cwd: target.cwd }));
+    else if (target) run(window.ntr.pick({ text, provider: target.provider, sessionId: target.sessionId }));
     else run(window.ntr.submit(text, viaVoice));
   }
 
@@ -243,21 +315,27 @@
       run(it.kind === 'new' ? window.ntr.pick({ text, new: true, provider: it.provider, cwd: it.cwd }) : window.ntr.pick({ text, provider: it.provider, sessionId: it.sessionId }));
       return;
     }
-    // history：已有正文就直接发过去；否则设为发送目标，回到输入
-    if (input.value.trim()) { target = it; mode = 'input'; items = []; send(); return; }
-    target = it; mode = 'input'; items = []; say(''); render(); input.focus();
+    // 任务列表：已有正文就直接发过去；否则设为发送目标，回到输入
+    target = it; mode = 'input'; items = []; filter.value = '';
+    if (input.value.trim()) return send();
+    say(''); render(); input.focus();
   }
+  // ⌘N：在选中任务所在的项目里新开一个会话（同一个工具）
+  const newInProject = (it) => it && it.card && choose({ kind: 'new', provider: it.provider, cwd: it.card.cwd });
 
-  async function openHistory() {
-    mode = 'history'; items = []; say(S.loadingHistory); render();
-    const h = await window.ntr.history();
-    if (mode !== 'history') return;
-    if (!h.length) { mode = 'input'; say(S.noHistory); render(); input.focus(); return; }
-    items = h.map((x) => ({ kind: 'session', ...x })); sel = 0; say(''); render();
+  async function openTasks() {
+    mode = 'tasks'; items = []; sel = 0; filter.value = ''; say(S.loadingTasks); render();
+    filter.placeholder = S.filterPh; filter.focus();
+    const t = await window.ntr.tasks();
+    if (mode !== 'tasks') return;
+    tasks = { running: t.running.map((x) => ({ kind: 'session', ...x })), recent: t.recent.map((x) => ({ kind: 'session', ...x })) };
+    if (!tasks.running.length && !tasks.recent.length) { mode = 'input'; say(S.noTasks); render(); input.focus(); return; }
+    filterTasks(); say(''); render();
   }
-  const closeList = () => { mode = 'input'; items = []; say(''); render(); input.focus(); };
+  const closeList = () => { mode = 'input'; items = []; filter.value = ''; say(''); render(); input.focus(); };
 
-  input.addEventListener('input', () => { grow(); if (mode === 'history') render(); });
+  input.addEventListener('input', () => grow());
+  filter.addEventListener('input', () => { if (mode === 'tasks') { sel = 0; filterTasks(); render(); } });
 
   window.addEventListener('keydown', (e) => {
     if (e.isComposing || e.keyCode === 229) return; // 输入法组字中，回车/方向键交给输入法
@@ -265,11 +343,12 @@
     if (voice) { voiceEnd(); say(''); } // 语音这一轮里按了键：人在电脑前，停下倒计时，这个键照常生效
     if (k === 'Escape') {
       e.preventDefault();
-      if (mode === 'history') return closeList();
+      if (mode === 'tasks') { if (filter.value) { filter.value = ''; filterTasks(); return render(); } return closeList(); }
       if (mode === 'input' && target) { target = null; return render(); }
       return window.ntr.cancel();
     }
-    if (mode === 'choose' || mode === 'history') {
+    if (mode === 'choose' || mode === 'tasks') {
+      if (mode === 'tasks' && (k === 'n' || k === 'N') && e.metaKey) { e.preventDefault(); return newInProject(items[sel]); }
       if (k === 'ArrowDown' || k === 'ArrowUp') {
         e.preventDefault();
         if (items.length) { sel = (sel + (k === 'ArrowDown' ? 1 : -1) + items.length) % items.length; render(); }
@@ -279,7 +358,7 @@
         e.preventDefault(); choose(items[Number(k) - 1]);
       } else if (mode === 'choose' && (k === 'n' || k === 'N')) {
         e.preventDefault(); choose(items.find((x) => x.kind === 'new'));
-      } else if (mode === 'history' && k === 'ArrowRight') {
+      } else if (mode === 'tasks' && (k === 'ArrowRight' || k === 'ArrowLeft') && !filter.value) {
         e.preventDefault(); closeList();
       } else if (mode === 'choose') {
         e.preventDefault(); // 选择中不往被禁用的输入框里打字
@@ -288,14 +367,14 @@
     }
     if (mode !== 'input') return;
     if (k === 'Enter' && !e.shiftKey) { e.preventDefault(); return send(); }
-    if (k === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) { e.preventDefault(); return openHistory(); }
+    if (k === 'ArrowLeft' && input.selectionStart === 0 && input.selectionEnd === 0) { e.preventDefault(); return openTasks(); }
     if (k === 'Backspace' && !input.value && target) { e.preventDefault(); target = null; return render(); }
   }, true);
 
   // 验收探针（入口 stdin 控制通道读取界面状态用；只读）
   window.__ntrProbe = () => ({
     mode, inflight, lastAction, sel, items: items.map((it) => (it.kind === 'new' ? 'NEW' : `${it.provider}:${it.sessionId}`)),
-    target: target ? `${target.provider}:${target.sessionId}` : null,
+    target: target ? (target.kind === 'new' ? `new:${target.provider}:${target.cwd}` : `${target.provider}:${target.sessionId}`) : null, filter: filter.value,
     value: input.value, inputHeight: input.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(input).lineHeight),
     boxHeight: box.getBoundingClientRect().height, msg: msg.textContent, hint: hint.textContent, voice: voice ? { auto: voice.auto, counting: !!voice.timer } : null,
   });

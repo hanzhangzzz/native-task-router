@@ -136,12 +136,12 @@ const live = (provider, sessionId, tty, state = 'idle', pid = 100) => ({ provide
 const view = (viewId, tty) => ({ surface: 'iterm', viewId, tty, title: '' });
 const TEXT = '修一下 "引号" $HOME\n第二行 😀';
 
-// ---- 1. 存活 + 空闲 + 干净 → write 一次再 focus ----
+// ---- 1. 存活 + 空闲 + 干净 → write 一次，不切过去 ----
 {
   const w = world({ cards: [card('claude', 'S1', root)], liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], views: [view('V1', '/dev/ttys1')] });
   const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1') });
   check('S1 存活空闲 → wrote', r.action === 'wrote' && r.viewId === 'V1' && r.sessionId === 'S1', JSON.stringify(r));
-  check('S1 write 恰一次且正文原样、随后 focus', w.calls.write.length === 1 && w.calls.write[0].t === TEXT && w.calls.focus.join() === 'V1');
+  check('S1 write 恰一次且正文原样、不 focus（留在入口）', w.calls.write.length === 1 && w.calls.write[0].t === TEXT && w.calls.focus.length === 0);
   check('S1 不二开', w.calls.openView.length === 0);
   check('S1 写入前重新取了存活映射(≥2 次)与视图列表(≥2 次)', w.calls.liveCalls >= 3 && w.calls.viewsCalls >= 2, `${w.calls.liveCalls}/${w.calls.viewsCalls}`);
 }
@@ -156,13 +156,16 @@ const refusal = async (name, wopts, expectAction = 'focused-only', pickId = 'S1'
   return { r, w };
 };
 const base = { cards: [card('claude', 'S1', root)], views: [view('V1', '/dev/ttys1')] };
-{
-  const { w } = await refusal('S7 状态 busy', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]] });
-  check('S7 busy 仍聚焦', w.calls.focus.join() === 'V1');
+// 正在跑也写：原生会把输入排到当前这一轮之后
+for (const st of ['busy', 'waiting', 'unknown']) {
+  const w = world({ ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', st)]] });
+  const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1') });
+  check(`S7 状态 ${st}、屏幕干净 → 照样 write，不 focus`, r.action === 'wrote' && w.calls.write.length === 1 && w.calls.focus.length === 0, JSON.stringify(r));
 }
-await refusal('S7 状态 waiting', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'waiting')]] });
-await refusal('S7 状态 unknown', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'unknown')]] });
-await refusal('S7 状态 idle 但屏幕是 Claude 审批框', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], tails: { V1: CLAUDE_APPROVAL } });
+{
+  const { w } = await refusal('S7 屏幕是 Claude 审批框', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], tails: { V1: CLAUDE_APPROVAL } });
+  check('S7 审批框：没写进去才把视图带到前台', w.calls.focus.join() === 'V1');
+}
 await refusal('草稿', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], tails: { V1: CLAUDE_DRAFT } });
 await refusal('写入前映射变化(同 tty 换了会话)', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')], [live('claude', 'S1', '/dev/ttys1')], [live('claude', 'OTHER', '/dev/ttys1')]] });
 await refusal('同 tty 上另有一个存活会话', { ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'idle', 100), live('codex', 'C9', '/dev/ttys1', 'idle', 101)]] });
@@ -262,7 +265,10 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   check('Codex 空闲 → queue(线程,正文)，不按键，草稿不影响', r.action === 'wrote' && c.calls.queue.length === 1 && c.calls.queue[0].s === 'C1' && c.calls.queue[0].t === TEXT && c.calls.write.length === 0);
   const b = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5', 'busy')]], views: [view('VC', '/dev/ttys5')], tails: { VC: CODEX_APPROVAL } });
   const rb = await open(TEXT, { ...b.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
-  check('Codex 忙/审批 → 不 queue(排队消息会随取消丢失)、不 write，只聚焦', rb.action === 'focused-only' && b.calls.queue.length + b.calls.write.length === 0 && b.calls.clip[0] === TEXT);
+  check('Codex 停在审批框 → 不 queue、不 write，只聚焦', rb.action === 'focused-only' && b.calls.queue.length + b.calls.write.length === 0 && b.calls.clip[0] === TEXT);
+  const bw = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5', 'busy')]], views: [view('VC', '/dev/ttys5')] });
+  const rbw = await open(TEXT, { ...bw.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
+  check('Codex 忙、屏幕干净 → 按键写入由界面排队，不走 queue(会随取消丢失)', rbw.action === 'wrote' && bw.calls.write.length === 1 && bw.calls.queue.length === 0 && bw.calls.focus.length === 0, JSON.stringify(rbw));
   const f = world({ cards: [card('codex', 'C1', root)], liveSeq: [[live('codex', 'C1', '/dev/ttys5')]], views: [view('VC', '/dev/ttys5')], queueFails: true });
   const rf = await open(TEXT, { ...f.opts, router: route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: 1, reason: 'x' }) });
   check('queue 失败 → failed + 剪贴板，不退回按键', rf.action === 'failed' && f.calls.write.length === 0 && f.calls.clip[0] === TEXT);
@@ -273,7 +279,7 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   const w = world({ ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], writeFails: true });
   const r = await open(TEXT, { ...w.opts, router: cont('claude', 'S1') });
   check('write 抛错 → failed + 剪贴板', r.action === 'failed' && w.calls.clip[0] === TEXT);
-  const w2 = world({ ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1', 'busy')]], clipFails: true });
+  const w2 = world({ ...base, liveSeq: [[live('claude', 'S1', '/dev/ttys1')]], tails: { V1: CLAUDE_DRAFT }, clipFails: true });
   const r2 = await open(TEXT, { ...w2.opts, router: cont('claude', 'S1') });
   check('剪贴板也失败 → 原因明说，仍不 write', r2.action === 'focused-only' && /剪贴板失败/.test(r2.why) && w2.calls.write.length === 0);
   const w3 = world({});

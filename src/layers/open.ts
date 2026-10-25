@@ -2,8 +2,11 @@
 // Router / Provider / Surface 全部注入，所以能用假实现逐条验证分支。
 //
 // 不变量（合同测试逐条断言）：
-//   A1 不在这里保证（Router 的阈值负责）；A2 写入前立即重新核对 tty→pid→sessionId、状态、屏幕，
+//   A1 不在这里保证（Router 的阈值负责）；A2 写入前立即重新核对 tty→pid→sessionId、屏幕，
 //      任一不满足绝不 write；已存活的会话绝不再起第二个 resume 进程。
+//      会话正在跑（busy/unknown）照样写：Claude Code 和 Codex 自己会把输入排到当前这一轮之后（2026-10-25 用户确认）；
+//      只有屏幕停在审批/选择框（回车会确认默认选项）或输入行有草稿时不写。
+//   A4 送达后不切到终端：人从统一入口派活，留在原地；只有没写进去（focused-only）才把那个视图带到前台。
 //   A3 任何没送达的路径（focused-only / failed）都把正文放进剪贴板；clarify 把候选原样返回，正文仍在调用方手里。
 //   F  delivery === 'fork' 的续接：绝不写进开着的视图、绝不在原 id 上 resume；一律新开视图执行 forkArgv，
 //      原会话正在某个进程里跑也照样分叉（分叉是新 id，不违反"同一会话不二开"）。分叉档续接的正文前加路由说明；
@@ -321,10 +324,10 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
     const view = views.length === 1 ? views[0]! : null;
 
     // Codex 空闲：走原生 queue 通道，不依赖视图/按键，也不会碰到输入行里的草稿
+    // （忙时不用它：排进去的消息会随取消这一轮丢失；忙时按键写入，由 Codex 界面自己排队）
     const queue = opts.queue?.[provider.id];
     if (queue && holder.state === 'idle') {
       await queue(sessionId, text);
-      if (view) await opts.surface.focus(view.viewId).catch(() => {});
       return finish({ action: 'wrote', viewId: view?.viewId ?? '', ...target });
     }
 
@@ -344,7 +347,6 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       return finish({ action: 'focused-only', viewId: view.viewId, ...target, why });
     }
     await opts.surface.write(view.viewId, text);
-    await opts.surface.focus(view.viewId).catch(() => {});
     return finish({ action: 'wrote', viewId: view.viewId, ...target });
   } catch (e) {
     return await failed(`open 出错: ${e instanceof Error ? e.message : String(e)}`);
@@ -357,7 +359,6 @@ async function whyNotWrite(holder: LiveSession, liveNow: LiveSession[], view: Su
   if (viewsNow.length !== 1 || viewsNow[0]!.viewId !== view.viewId) return '终端对应的视图发生变化或不唯一';
   const here = liveNow.filter((l) => l.tty === holder.tty);
   if (here.length !== 1 || here[0]!.sessionId !== holder.sessionId || here[0]!.pid !== holder.pid) return '该终端上的会话映射发生变化或不唯一';
-  if (here[0]!.state !== 'idle') return `会话状态是 ${here[0]!.state}，不是 idle`;
   const tail = await surface.screenTail(view.viewId, SCREEN_TAIL_LINES);
   return approvalPrompt(tail) ?? pendingDraft(tail);
 }
