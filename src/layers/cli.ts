@@ -13,7 +13,7 @@ import { interimRouter } from './router/interim.ts';
 import { createRouterV2 } from './router/v2.ts';
 import { createRouterV3 } from './router/v3.ts';
 import { guarded } from './guard.ts';
-import { approvalPrompt, entryLogPath, open, parsePrompt, readHistory, readPrevious, SCREEN_TAIL_LINES } from './open.ts';
+import { approvalPrompt, entryLogPath, open, parsePrompt, readHistory, readPrevious, startupWaits, SCREEN_TAIL_LINES } from './open.ts';
 import type { OpenOutcome, Provider, ProviderId, Router, SessionCard } from './types.ts';
 
 // 入口借 Electron 的 Node 跑本 CLI，靠 ELECTRON_RUN_AS_NODE=1；它只在进程启动时读一次。立刻删掉，
@@ -125,13 +125,14 @@ async function main(): Promise<number> {
         }),
       )
     ).flat();
+    const startup = await startupWaits(surface, entryLogPath(), views.filter((v) => !running.some((r) => r.viewId === v.viewId)));
     const open = new Set(running.map((r) => `${r.provider}:${r.sessionId}`));
     const recent = cards
       .filter((c) => !open.has(`${c.provider}:${c.sessionId}`))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
       .slice(0, Number(flag(args, '--limit') ?? 60))
       .map((c) => ({ provider: c.provider, sessionId: c.sessionId, card: brief(c) }));
-    console.log(JSON.stringify({ running, recent }));
+    console.log(JSON.stringify({ running: [...running, ...startup], recent }));
     return 0;
   }
   if (cmd === 'live') {
@@ -228,6 +229,7 @@ function describe(o: OpenOutcome, card: (p: ProviderId, id: string | null) => Se
     case 'answered': return o.option == null ? '屏幕已不在选项框，没有按键' : `已选选项 ${o.option}`;
     case 'focused-only': return `只聚焦 ${name(o.provider, o.sessionId)}: ${o.why}`;
     case 'opened':
+      if (o.nativePrompt) return `已交给 ${o.provider}，等待 Mac 上的原生选择；尚未确认开始执行。请在 Mac 终端处理。`;
       if (o.forkedFrom) return `已分叉续接 ${name(o.provider, o.forkedFrom)} · 置信度 ${o.confidence?.toFixed(2) ?? '?'}${o.sessionId ? `（新会话 ${o.sessionId}，原会话未改动）` : '（原会话未改动）'}`;
       return `已新开 ${o.provider} 于 ${o.cwd}${o.sessionId ? `（会话 ${o.sessionId}）` : ''}`;
     case 'clarify': return `需要选择${o.reason ? `（${o.reason}）` : ''}:\n${o.suggestNew ? `  建议新建 ${o.suggestNew.provider}${o.suggestNew.cwd ? ` 于 ${o.suggestNew.cwd}` : ''}\n` : ''}${o.options.map((x, i) => `  ${i + 1}. ${name(x.provider, x.sessionId)}${x.probability === null ? '' : ` (${x.probability.toFixed(2)})`}`).join('\n')}`;

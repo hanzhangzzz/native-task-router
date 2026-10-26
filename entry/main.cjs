@@ -280,6 +280,7 @@ function describe(o) {
     case 'answered': return o.option == null ? t().apGone : t().apDone(o.option);
     case 'focused-only': return t().focused(label(o), o.why);
     case 'opened':
+      if (o.nativePrompt) return LANG === 'zh' ? '已交给原生 CLI，等待 Mac 上的选择；尚未确认开始执行。请在 Mac 终端处理。' : 'Handed to the native CLI; waiting for a choice on your Mac. Execution has not been confirmed. Continue in the Mac terminal.';
       // 分叉送达：显示原会话的名字（新会话在新标签页里，原会话未改动）
       if (o.forkedFrom) return t().forked(label(o, o.forkedFromCard ?? null, o.forkedFrom), typeof o.confidence === 'number' ? o.confidence.toFixed(2) : '?');
       return t().opened(o.provider, o.cwd);

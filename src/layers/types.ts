@@ -157,6 +157,8 @@ export type OpenOutcome =
     }
   | {
       action: 'opened';
+      /** 原生启动仍停在选择框；正文已交给 CLI，需在 Mac 完成选择。 */
+      nativePrompt?: PromptInfo;
       viewId: string;
       provider: ProviderId;
       /** 新开视图里的会话 id；分叉时是分叉出的新 id（取不到为 null，不编造） */

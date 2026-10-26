@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ntr-open-'));
 process.env.NTR_HOME = path.join(root, 'ntr');
-const { open, approvalPrompt, answerKeys, parsePrompt, pendingDraft, shortName, readPrevious, readHistory } = await import('../src/layers/open.ts');
+const { open, approvalPrompt, answerKeys, parsePrompt, pendingDraft, shortName, readPrevious, readHistory, startupWaits } = await import('../src/layers/open.ts');
 const { interimRouter, recall, MAX_CANDIDATES } = await import('../src/layers/router/interim.ts');
 const { routingNote, routingNoteNew, stripRoutingNote } = await import('../src/layers/routing-note.ts');
 
@@ -513,6 +513,24 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
   const fn = world({});
   await open(TEXT, { ...fn.opts, router: forkRoute('claude', 'S2'), forceNew: { provider: 'claude', cwd: proj } });
   check('人工 --new：不加说明头', sameArgv(fn.calls.openView[0].argv, ['claude', TEXT]));
+}
+
+// Startup chooser appears before a fork has a live session id.
+{
+  const chooser = 'Working directory · fork\n› Use session directory (/workspace/sample)\n  Use current directory (/workspace/other)\n  Always use current directory (/workspace/other)';
+  check('Codex startup chooser is recognized without numbered options', approvalPrompt(chooser) !== null && parsePrompt(chooser).context.includes('Use session directory'));
+  for (const kind of ['fork', 'new', 'resume']) {
+    const w = world({ cards: [card('codex', 'C1', root)], tails: { NEWVIEW: chooser } });
+    const router = kind === 'new' ? route({ kind: 'new', provider: 'codex', cwd: root, confidence: null }) : route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: .9, ...(kind === 'fork' ? { delivery: 'fork' } : {}) });
+    const r = await open('Update the sample tests', { ...w.opts, router });
+    check(`${kind}: startup choice is returned, no keys are pressed`, r.action === 'opened' && r.nativePrompt?.question === 'Working directory · fork' && !w.calls.press.length && !w.calls.write.length);
+    const views = [view('NEWVIEW', '/dev/ttys9')];
+    const waits = await startupWaits(w.opts.surface, w.opts.logPath, views);
+    check(`${kind}: existing opened view is visible without sessionId`, waits.length === 1 && waits[0].sessionId === null && waits[0].nativeWaiting && waits[0].state === 'waiting');
+    check(`${kind}: closed views never become ghost tasks`, (await startupWaits(w.opts.surface, w.opts.logPath, [])).length === 0);
+    w.opts.surface.screenTail = async () => CODEX_IDLE;
+    check(`${kind}: resolved chooser disappears on refresh`, (await startupWaits(w.opts.surface, w.opts.logPath, views)).length === 0);
+  }
 }
 
 console.log(`\n${pass} PASS / ${fail} FAIL`);

@@ -76,6 +76,8 @@ const INPUT_WINDOW = 10;
 //                    … / Press enter to confirm or esc to cancel"
 // 其余选择类菜单（模型选择、/ 命令、信任目录）同样带编号选项或 "Enter to select"。宁可多拦：误拦只是少一次自动送达。
 const PROMPT_PATTERNS: RegExp[] = [
+  /Working directory\s*(?:·|$)/im,
+  /Use session directory \(/,
   /Do you want to /,
   /Would you like to /,
   /Esc to cancel/i,
@@ -124,7 +126,7 @@ export function parsePrompt(tail: string): PromptInfo {
       break;
     }
   }
-  if (end < 0) return { question: null, context: null, options: [] };
+  if (end < 0) return { question: lines.find((l) => /Working directory/.test(l))?.trim() ?? null, context: tail.trim().slice(-1200), options: [] };
   const options: Array<{ label: string }> = [];
   let expect = Number(lines[end]!.match(OPTION_LINE)![1]);
   let i = end;
@@ -350,7 +352,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       const body = decision.confidence !== null ? routingNoteNew(text, decision.confidence, path.basename(cwd)) : text;
       const view = await opts.surface.openView(cwd, provider.newArgv(body), { windowId: opts.windowId });
       const sessionId = await settle(provider, view, opts.settleMs ?? 2500);
-      return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd });
+      const nativePrompt = await startupPrompt(opts.surface, view);
+      return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId, cwd, ...(nativePrompt ? { nativePrompt } : {}) });
     }
 
     // ---- continue ----
@@ -365,7 +368,8 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       if (!card) return await failed(`找不到会话 ${provider.id}:${sessionId}`);
       const view = await opts.surface.openView(card.cwd, provider.forkArgv(sessionId, routingNote(text, decision.confidence)), { windowId: opts.windowId });
       const forkId = await settle(provider, view, opts.settleMs ?? 2500, sessionId);
-      return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId: forkId, cwd: card.cwd, forkedFrom: sessionId, confidence: decision.confidence });
+      const nativePrompt = await startupPrompt(opts.surface, view);
+      return finish({ action: 'opened', viewId: view.viewId, provider: provider.id, sessionId: forkId, cwd: card.cwd, forkedFrom: sessionId, confidence: decision.confidence, ...(nativePrompt ? { nativePrompt } : {}) });
     }
 
     // 写入前立即重新取：存活映射与视图列表都用此刻的，而不是路由时的
@@ -375,7 +379,9 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       const card = cards.find((c) => c.provider === provider.id && c.sessionId === sessionId);
       if (!card) return await failed(`找不到会话 ${provider.id}:${sessionId}`);
       const view = await opts.surface.openView(card.cwd, provider.resumeArgv(sessionId, text), { windowId: opts.windowId });
-      return finish({ action: 'opened', viewId: view.viewId, ...target, cwd: card.cwd });
+      await settle(provider, view, opts.settleMs ?? 2500);
+      const nativePrompt = await startupPrompt(opts.surface, view);
+      return finish({ action: 'opened', viewId: view.viewId, ...target, cwd: card.cwd, ...(nativePrompt ? { nativePrompt } : {}) });
     }
 
     // 已存活：绝不二开。以下只可能 write / queue / awaiting-approval / answered / focused-only / failed
@@ -478,4 +484,28 @@ async function settle(provider: Provider, view: SurfaceView, ms: number, notId?:
     if (Date.now() >= until) return null;
     await sleep(400);
   }
+}
+
+/** 只观察原生选择框，不代替用户决定启动目录/信任。 */
+async function startupPrompt(surface: OpenSurface, view: SurfaceView): Promise<PromptInfo | null> {
+  try {
+    const tail = await surface.screenTail(view.viewId, SCREEN_TAIL_LINES);
+    return approvalPrompt(tail) ? parsePrompt(tail) : null;
+  } catch { return null; }
+}
+
+/** 仅补查入口曾打开且仍存在的视图；启动尚无 sessionId 时也可反馈等待。 */
+export async function startupWaits(surface: OpenSurface, logPath: string, views: SurfaceView[]) {
+  let lines: string[];
+  try { lines = fs.readFileSync(logPath, 'utf8').trim().split('\n').slice(-100); } catch { return []; }
+  const opened = new Map<string, Extract<OpenOutcome, { action: 'opened' }>>();
+  for (const line of lines) {
+    try { const o = JSON.parse(line).outcome; if (o?.action === 'opened') opened.set(o.viewId, o); } catch { /* ignore malformed log rows */ }
+  }
+  return (await Promise.all(views.map(async (view) => {
+    const o = opened.get(view.viewId);
+    if (!o) return [];
+    const prompt = await startupPrompt(surface, view);
+    return prompt ? [{ provider: o.provider, sessionId: null, viewId: view.viewId, viewTitle: view.title, state: 'waiting', nativeWaiting: true, prompt, card: null }] : [];
+  }))).flat();
 }

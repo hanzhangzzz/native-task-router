@@ -21,6 +21,9 @@
   button { border: 0; border-radius: 12px; background: #0a84ff; color: #fff; font: inherit; padding: 10px 16px; }
   button.sec { background: #48484a; }
   button.big { width: 100%; padding: 13px; font-size: 16px; }
+  button:disabled { opacity: .5; cursor: wait; }
+  button.loading::before { content: ""; display: inline-block; width: 14px; height: 14px; margin-right: 8px; border: 2px solid #ffffff55; border-top-color: #fff; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
   button:active { opacity: .7; }
   .chip { display: inline-flex; gap: 6px; align-items: center; background: #3a3a3c; border-radius: 999px; padding: 3px 6px 3px 12px; font-size: 13px; margin: 0 8px 8px 0; }
   .chip b { font-weight: 500; }
@@ -63,15 +66,17 @@
 </div>
 <script>
 const S = {
-  zh: { send: '送到 Mac', ph: '说一句话，路由到 Mac 上对的会话…', tasks: 'Mac 上的任务', refresh: '刷新', ok: '已连上 Mac', bad: '连不上（Mac 睡了？隧道断了？）',
+  zh: { send: '送到 Mac', sending: '正在送到 Mac…', nativeState: '待选择', nativeWait: '已交给原生 CLI，等待 Mac 上的选择；尚未确认开始执行。请在 Mac 终端处理。', ph: '说一句话，路由到 Mac 上对的会话…', tasks: 'Mac 上的任务', refresh: '刷新', ok: '已连上 Mac', bad: '连不上（Mac 睡了？隧道断了？）',
     gate: '粘贴 Mac 菜单栏「手机远程 → 复制手机链接」里 # 后面的那串令牌：', save: '保存', clear: '新会话', wait: '等批准', busy: '忙', new: '新建', pick: '选定目标', none: '(无标题)' },
-  en: { send: 'Send to Mac', ph: 'One sentence, routed to the right session on your Mac…', tasks: 'Tasks on your Mac', refresh: 'Refresh', ok: 'Mac connected', bad: "Can't reach the Mac (asleep? tunnel down?)",
+  en: { send: 'Send to Mac', sending: 'Sending to Mac…', nativeState: 'Needs choice', nativeWait: 'Handed to the native CLI; waiting for a choice on your Mac. Execution has not been confirmed. Continue in the Mac terminal.', ph: 'One sentence, routed to the right session on your Mac…', tasks: 'Tasks on your Mac', refresh: 'Refresh', ok: 'Mac connected', bad: "Can't reach the Mac (asleep? tunnel down?)",
     gate: 'Paste the token after # from the Mac menu bar item:', save: 'Save', clear: 'New', wait: 'Awaiting approval', busy: 'Busy', new: 'New session', pick: 'Picked target', none: '(untitled)' },
 };
 const L = (navigator.language || 'zh').toLowerCase().startsWith('zh') ? S.zh : S.en;
 const $ = (id) => document.getElementById(id);
 let token = localStorage.getItem('ntr-token') || '';
 let target = null;      // {provider,sessionId,card} | {new:true,provider,cwd}
+let busy = false;
+function setBusy(value) { busy = value; $('send').disabled = value; $('send').classList.toggle('loading', value); $('send').textContent = value ? L.sending : L.send; $('send').setAttribute('aria-busy', String(value)); }
 let pendingText = '';   // 等批准/拿不准时扣住的正文，选完选项后接着送
 function api(path, body) {
   return fetch(path, { method: body ? 'POST' : 'GET', headers: { authorization: 'Bearer ' + token, ...(body ? { 'content-type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined })
@@ -125,17 +130,22 @@ function result(r) {
     return;
   }
   out.innerHTML = `<div class="result${r.action === 'failed' ? ' fail' : ''}"></div>`;
-  out.firstChild.textContent = r.line || r.action;
+  out.firstChild.textContent = r.nativePrompt ? L.nativeWait : r.line || r.action;
   if (r.action !== 'failed' && r.action !== 'focused-only') $('in').value = '';
   pendingText = '';
 }
 async function answer(r, n) {
+  if (busy) return;
+  setBusy(true);
   try { result(await api('/api/open', { target: { provider: r.provider, sessionId: r.sessionId, answer: n }, text: '' })); } catch (e) { result({ action: 'failed', line: String(e.message || e) }); }
+  setBusy(false);
   poll();
 }
 async function submit(text) {
-  if (!text && !target) return;
+  if (busy || (!text && !target)) return;
+  setBusy(true);
   try { result(await api('/api/open', { text, ...(target && !target.answer ? { target } : {}) })); } catch (e) { result({ action: 'failed', line: String(e.message || e) }); }
+  setBusy(false);
   poll();
 }
 $('send').onclick = () => submit($('in').value.trim());
@@ -149,13 +159,13 @@ function renderTasks(o) {
   const el = $('tasks'); el.innerHTML = '';
   for (const t of (o.running || [])) {
     const d = document.createElement('div'); d.className = 'task';
-    const badge = t.state === 'waiting' ? `<span class="badge wait">${L.wait}</span>` : t.state === 'busy' ? `<span class="badge busy">${L.busy}</span>` : '';
+    const badge = t.prompt || t.state === 'waiting' ? `<span class="badge wait">${t.nativeWaiting ? L.nativeState : L.wait}</span>` : t.state === 'busy' ? `<span class="badge busy">${L.busy}</span>` : '';
     d.innerHTML = `<div class="t"><span><span class="name"></span> <span class="proj"></span></span>${badge}</div><div class="last"></div>`;
-    d.querySelector('.name').textContent = t.card?.title || L.none;
+    d.querySelector('.name').textContent = t.card?.title || t.viewTitle || t.provider || L.none;
     d.querySelector('.proj').textContent = t.card?.project || '';
-    d.querySelector('.last').textContent = (t.card?.reply || '').slice(0, 120);
-    d.onclick = () => { target = { provider: t.provider, sessionId: t.sessionId, card: t.card }; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-    if (t.prompt && t.prompt.options) {
+    d.querySelector('.last').textContent = t.nativeWaiting ? L.nativeWait : t.prompt ? [t.prompt.question, t.prompt.context].filter(Boolean).join(' ') : (t.card?.reply || '').slice(0, 120);
+    d.onclick = () => { if (t.nativeWaiting) return; target = { provider: t.provider, sessionId: t.sessionId, card: t.card }; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+    if (!t.nativeWaiting && t.prompt && t.prompt.options) {
       const box = document.createElement('div'); box.className = 'opts';
       t.prompt.options.forEach((op, i) => { const b = document.createElement('button'); b.textContent = `${i + 1}. ${op.label || ''}`; b.onclick = (ev) => { ev.stopPropagation(); answer(t, i + 1); }; box.appendChild(b); });
       d.appendChild(box);
