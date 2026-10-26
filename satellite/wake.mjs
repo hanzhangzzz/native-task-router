@@ -27,14 +27,17 @@ export function compileWake(word = DEFAULT_WAKE_WORD) {
 
 /**
  * 在 text 里找唤醒词。命中返回 { cost, rest }：rest 是唤醒词之后的话（一口气连着说的那件事）；没命中返回 null。
- * 唤醒词可以出现在任何位置（前面可能有"嗯""那个"或上一句的尾巴），取代价最小的一处。
+ * 唤醒词必须在句首附近（prefixSlack 个字以内的前缀，容纳"嗯""那个"这类口头垫字）：
+ * 2026-10-26 真实事故——家人闲聊的长句在句中段凑出近音窗口、触发唤醒，后续聊天被当成任务送进路由。
+ * 从那以后句子中后段的近音一律不认：真唤醒总是把唤醒词放在一句话的开头说。
  */
-export function matchWake(text, wake, maxCost = wake.maxCost) {
+export function matchWake(text, wake, maxCost = wake.maxCost, prefixSlack = 2) {
   const syl = syllables(text);
   if (!syl.length) return null;
-  // 半全局编辑距离：唤醒词必须完整对齐，转写里的起止位置自由
+  // 半全局编辑距离：唤醒词必须完整对齐；起点限制在句首 prefixSlack 字内，终点自由（后面是要派的活）
   const n = wake.syl.length, m = syl.length;
-  let prev = new Array(m + 1).fill(0);
+  let prev = new Array(m + 1).fill(Infinity);
+  for (let b = 0; b <= Math.min(prefixSlack, m); b++) prev[b] = 0;
   for (let a = 1; a <= n; a++) {
     const cur = [prev[0] + SKIP];
     for (let b = 1; b <= m; b++) cur[b] = Math.min(prev[b - 1] + sub(syl[b - 1], wake.syl[a - 1]), prev[b] + SKIP, cur[b - 1] + SKIP);

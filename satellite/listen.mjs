@@ -130,8 +130,10 @@ function onAudio(samples) {
   }
 }
 
-function woke(cost) {
+function woke(cost, text) {
   log(`唤醒（差异 ${cost}）`);
+  // 唤醒触发记一行到 cache（可删）：下次再误触，看这行就知道是哪句话、差异多少，不用猜
+  try { fs.mkdirSync(path.join(NTR_HOME, 'cache'), { recursive: true }); fs.appendFileSync(path.join(NTR_HOME, 'cache', 'wake-log.jsonl'), JSON.stringify({ t: new Date().toISOString(), cost, text: String(text).slice(0, 80) }) + '\n'); } catch { /* 记不上不影响唤醒 */ }
   if (EVENTS) emit({ ev: 'wake' });
   chime();
   state = 'listen'; waited = 0; uttWake = true;
@@ -148,10 +150,12 @@ function partial() {
   const from = state === 'idle' ? Math.max(uttStart, fed - WAKE_WINDOW) : uttStart;
   const text = transcribe(ringRead(from, fed));
   if (state === 'idle') {
+    // 只在窗口还盖着句首时找唤醒词（配合 wake.mjs 的句首锚定）：长句说到一半后，滑动窗口里句子中段的
+    // 近音不再触发唤醒——2026-10-26 家人聊天误触就是这么来的；句首喊的唤醒词在前 3 秒窗口内就能认出。
+    if (from !== uttStart) return;
     const m = matchWake(text, WAKE);
     if (!m) return;
-    uttStart = from; // 这一句从唤醒词所在的窗口算起，前面的背景声不算进要派的活
-    woke(m.cost);
+    woke(m.cost, text);
   }
   const s = said(text);
   if (s !== lastSaid) { lastSaid = s; if (EVENTS) emit({ ev: 'partial', text: s }); }
@@ -178,7 +182,7 @@ async function handle(seg) {
   if (state === 'idle') {
     const m = matchWake(text, WAKE);
     if (!m) return;
-    woke(m.cost);
+    woke(m.cost, text);
   }
   let task = said(text);
   if (!uttWake) {
