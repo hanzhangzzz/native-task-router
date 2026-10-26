@@ -77,7 +77,7 @@
       chooseKeys: [['↑↓', '选择'], ['↵', '确认'], ['1–9', '直选'], ['N', '新建'], ['Esc', '取消']],
       taskKeys: (hasText) => [['↑↓ 1–9', '选择'], ['↵', hasText ? '发给它' : '设为发送目标'], ['⌘N', '在该项目新开'], ['Esc', '返回']],
       to: '→ 发往 ', escCancel: 'Esc 取消', notSent: (r) => `没有自动发送：${r}`, unsure: '拿不准，选一个去处：',
-      routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingTasks: '读取任务…', noTasks: '没有找到会话',
+      nativeWait: '等待 Mac 原生选择，请在 Mac 终端处理。', routing: '处理中…', creating: '新建中…', sending: '送达中…', loadingTasks: '读取任务…', noTasks: '没有找到会话',
       secRunning: (n) => `正在运行 · ${n}`, secRecent: '最近', filterPh: '打字筛选项目、标题…', noMatch: '没有匹配的任务',
       state: { idle: '空闲', busy: '运行中', waiting: '等待中', unknown: '状态未知' }, it: '它：', you: '你：',
       apState: '等批准', apPrefix: '等批准：', apDefault: '确认当前高亮项', apNoQ: '任务在等批准，选一下：',
@@ -100,7 +100,7 @@
         '置信度低于阈值': 'confidence below the threshold',
       }[r] || 'not sure where it goes'}. Pick one:`,
       unsure: 'Not sure where this goes. Pick one:',
-      routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingTasks: 'Loading tasks…', noTasks: 'No sessions found',
+      nativeWait: 'Waiting for a native choice. Continue in the Mac terminal.', routing: 'Routing…', creating: 'Creating…', sending: 'Sending…', loadingTasks: 'Loading tasks…', noTasks: 'No sessions found',
       secRunning: (n) => `Running · ${n}`, secRecent: 'Recent', filterPh: 'Type to filter by project or title…', noMatch: 'No matching tasks',
       state: { idle: 'idle', busy: 'working', waiting: 'waiting', unknown: 'unknown' }, it: 'Agent: ', you: 'You: ',
       apState: 'approval', apPrefix: 'Approval: ', apDefault: 'Confirm the highlighted option', apNoQ: 'A task is waiting for your approval:',
@@ -343,6 +343,7 @@
 
   function choose(it) {
     if (!it) return;
+    if (it.nativeWaiting) { say(S.nativeWait); return; }
     if (mode === 'approve') {
       // 替目标选第 n 项；输入框里拿着的话由 CLI 在选项框消失后自动发过去
       const option = items.indexOf(it) + 1;
