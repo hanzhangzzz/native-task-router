@@ -8,6 +8,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const updater = require('./updater.cjs');
+const { createRemoteServer } = require('./remote.cjs');
 
 // 设置（快捷键、开机启动）存在 ~/.ntr/settings.json；环境变量 NTR_HOTKEY 优先（开发与测试用）
 const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
@@ -50,6 +51,8 @@ const T = {
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
     voiceTimeout: '没听到，下次再叫我', voiceDraft: '输入框里还有没发出去的话，这句接在后面了，回到电脑处理', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
+    trayRemote: '手机远程', rsOff: '已关闭', rsUp: '隧道已连接', rsConn: '隧道连接中…', rsDown: '隧道断开，重连中…', rsUnconf: '未配置（~/.ntr/remote/config.json，见 README「手机远程」）',
+    remoteCopy: '复制手机链接（含令牌）', remoteCopied: '已复制，在手机浏览器打开并加到主屏',
   },
   en: {
     untitled: '(untitled)', noOutput: 'no output', wrote: (p, l) => `Sent to ${p}: ${l}`,
@@ -68,6 +71,8 @@ const T = {
     voiceTimeout: "Didn't hear anything.", voiceDraft: "The input box still had an unsent message, so this was added after it. Finish it at your computer.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
+    trayRemote: 'Mobile remote', rsOff: 'Off', rsUp: 'Tunnel connected', rsConn: 'Tunnel connecting…', rsDown: 'Tunnel down, reconnecting…', rsUnconf: 'Not configured (~/.ntr/remote/config.json — see README "Mobile remote")',
+    remoteCopy: 'Copy phone link (includes token)', remoteCopied: 'Copied. Open it in your phone browser and add to home screen',
   },
 };
 const t = () => T[LANG];
@@ -356,6 +361,40 @@ ipcMain.handle('tasks', () => new Promise((resolve) => {
   });
 }));
 
+// ---- 手机远程：127.0.0.1 服务 + 受限 SSH 反向隧道（配置见 ~/.ntr/remote/config.json，见 remote.cjs 头注释） ----
+let remote = null; // createRemoteServer 返回的实例；null = 关闭
+let remoteLastStatus = 'off';
+const RS = { off: 'rsOff', up: 'rsUp', connecting: 'rsConn', down: 'rsDown', unconfigured: 'rsUnconf' };
+async function startRemoteApp() {
+  if (remote) return;
+  remote = createRemoteServer({
+    ntrHome: NTR_HOME,
+    port: Number(process.env.NTR_REMOTE_PORT) || 8765,
+    runCli,
+    pageFile: path.join(__dirname, 'remote.html'),
+    trace,
+    onTunnelStatus: (s) => { remoteLastStatus = s; refreshTray(); },
+  });
+  remoteLastStatus = remote.config ? 'connecting' : 'unconfigured';
+  try { await remote.start(); } catch (e) {
+    console.error(`手机远程服务没有启动：${e.message}`);
+    trace({ ev: 'remote-server-error', error: String(e.message || e) });
+    remote.stop(); remote = null; remoteLastStatus = 'off';
+  }
+  refreshTray();
+}
+function stopRemoteApp() { remote?.stop(); remote = null; remoteLastStatus = 'off'; refreshTray(); }
+function remoteItems() {
+  const enabled = !!remote;
+  const items = [{ label: t().trayRemote, type: 'checkbox', checked: enabled, click: (i) => { saveSettings({ remoteMobile: i.checked }); if (i.checked) void startRemoteApp(); else stopRemoteApp(); } }];
+  if (enabled) {
+    items.push({ label: t()[RS[remoteLastStatus] || 'rsOff'], enabled: false });
+    const url = remote.mobileUrl();
+    if (url) items.push({ label: t().remoteCopy, click: () => { require('electron').clipboard.writeText(url); dialog.showMessageBox({ message: t().remoteCopied }); } });
+  }
+  return items;
+}
+
 // ---- 快捷键（可在菜单栏修改，被占用时退回原来的） ----
 function registerHotkey(acc) {
   const prev = HOTKEY;
@@ -458,6 +497,7 @@ function refreshTray() {
     { label: t().trayHotkey, click: openHotkeyWindow },
     voiceItem(),
     { label: t().trayWake, click: openWakeWindow },
+    ...remoteItems(),
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
@@ -489,6 +529,7 @@ app.whenReady().then(async () => {
   }
   refreshTray();
   if (loadSettings().voiceWake) void startVoice();
+  if (loadSettings().remoteMobile) void startRemoteApp();
   // 启动 10 秒后查一次新版本，之后每 6 小时一次；只点亮菜单，不打扰
   if (app.isPackaged) { setTimeout(() => void checkUpdate(false), 10_000); setInterval(() => void checkUpdate(false), 6 * 3600_000); }
   if (!registerHotkey(HOTKEY)) {
@@ -539,4 +580,4 @@ function controlFromStdin() {
   });
 }
 app.on('window-all-closed', () => { /* 常驻：没有窗口也不退出 */ });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); listener?.kill(); });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); listener?.kill(); remote?.stop(); });
