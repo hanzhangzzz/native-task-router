@@ -519,6 +519,8 @@ await refusal('一个 tty 对应两个视图', { ...base, views: [view('V1', '/d
 {
   const chooser = 'Working directory · fork\n› Use session directory (/workspace/sample)\n  Use current directory (/workspace/other)\n  Always use current directory (/workspace/other)';
   check('Codex startup chooser is recognized without numbered options', approvalPrompt(chooser) !== null && parsePrompt(chooser).context.includes('Use session directory'));
+  check('quoted directory option in normal output is not a startup chooser', approvalPrompt('The documentation says Use session directory (/workspace/sample).\nWorking directory selection can be configured.') === null);
+  check('directory title alone is not a startup chooser', approvalPrompt('Working directory · fork\nRendering sample documentation') === null);
   for (const kind of ['fork', 'new', 'resume']) {
     const w = world({ cards: [card('codex', 'C1', root)], tails: { NEWVIEW: chooser } });
     const router = kind === 'new' ? route({ kind: 'new', provider: 'codex', cwd: root, confidence: null }) : route({ kind: 'continue', provider: 'codex', sessionId: 'C1', confidence: .9, ...(kind === 'fork' ? { delivery: 'fork' } : {}) });

@@ -76,8 +76,6 @@ const INPUT_WINDOW = 10;
 //                    … / Press enter to confirm or esc to cancel"
 // 其余选择类菜单（模型选择、/ 命令、信任目录）同样带编号选项或 "Enter to select"。宁可多拦：误拦只是少一次自动送达。
 const PROMPT_PATTERNS: RegExp[] = [
-  /Working directory\s*(?:·|$)/im,
-  /Use session directory \(/,
   /Do you want to /,
   /Would you like to /,
   /Esc to cancel/i,
@@ -92,6 +90,9 @@ const PLACEHOLDERS = /^(?:Ask Codex to do anything|Write tests for @|Improve doc
 
 /** 屏幕末尾是否停在审批/选择框；是则返回原因。 */
 export function approvalPrompt(tail: string): string | null {
+  if (/^\s*Working directory(?:\s*·\s*(?:fork|resume))?\s*$/im.test(tail)
+      && /^\s*[❯›>]?\s*Use session directory \(/m.test(tail)
+      && /^\s*[❯›>]?\s*Use current directory \(/m.test(tail)) return '屏幕停在原生工作目录选择框';
   if (PROMPT_PATTERNS.some((p) => p.test(tail))) return '屏幕停在审批/选择框';
   if (NUMBERED_CHOICE.every((p) => p.test(tail))) return '屏幕出现编号选项框';
   return null;
