@@ -18,13 +18,17 @@
 //   - 续接：项目置信度 < forkConfidence（默认 0.85）→ clarify；
 //   - NEW：只在直接档自动，项目置信度 < newConfidence（默认等于 minConfidence 0.95，不得低于 forkConfidence）→ clarify，
 //     入口预选"在项目 X 新建"。新建既没有原会话可分叉保护、也没有已有线程做锚，不能用分叉档的门槛；
-//   - 线程置信度 < threadConfidence（默认 0.7，NTR_ROUTER_THREAD_CONFIDENCE）→ clarify，候选按模型排好的项目各自的首选线程/新建；
+//   - 线程置信度 < threadConfidence（默认 0.5，NTR_ROUTER_THREAD_CONFIDENCE）→ clarify，候选按模型排好的项目各自的首选线程/新建；
 //     NEW 决策的线程置信度就是模型对"该新开"的把握，同样过这道闸；
 //   - thread = NEW → 在该项目新建（NEW_PROJECT 则新目录），open.ts 在正文前加"自动新建在项目 X"的路由说明，不分叉；
 //   - thread = 某线程，项目 ≥ minConfidence（默认 0.95）且线程 ≥ directThreadConfidence（0.85）→ direct：写进/续接原会话；
 //   - thread = 某线程，其余自动情形 → fork：从原会话分叉，原会话不动，正文前加路由说明。
 // 为什么拆开（2026-10-20，见研究文档「Router v3.1」「Router v3.2」）：v3.1 让一个置信度同时描述项目和线程，项目本来有把握的
 // 样本被线程的不确定拖低，dev 自动率从 37.6% 掉到 14.8%。线程阈值 0.7 是在 dev 上预先定的：分叉档全对 77% → 86.5%，自动率 36.5% → 26.1%。
+// 2026-10-26 线程闸 0.7 → 0.5（只放宽"分叉"这一档的准入，直写仍要 0.85）：dev 上该闸从不触发（conf≥0.85 时模型线程置信都 ≥0.7，
+// 扫不出差别）；对 0.6.0 留出集同一次 run 的事后重算：+11 自动（8 全对、2 对项目错线程、1 错项目且是自报型分叉，原会话不动）。
+// 放宽的依据是分叉的失败模式可回收：错分叉带路由说明，agent 会自己喊"不属于这里"并停手。真实入口日志自 0.12.1 起补记两个置信度，
+// 攒到真实分布后再决定是否继续动这道闸。
 // 快路径始终 direct。
 import type { ProviderId, RouteContext, RouteOption, Router, RouteDecision, SessionCard, LiveSession } from '../types.ts';
 import { ago, cardKey, claudeCliComplete, cleanReply, contentFree, noiseTitle, openRouterComplete, redact } from './v2.ts';
@@ -33,7 +37,7 @@ import type { Complete, CompleteRequest, CompleteResult } from './v2.ts';
 // v3.0-project-first-opus-t0.85 → v3.1：模型同时选项目与项目内线程（或 NEW），删除项目内选会话的固定规则（pickInProject、24h 续接窗）；
 // v3.2：项目置信度与线程置信度分开，档位只看项目置信度（0.95 / 0.85），线程置信度 ≥0.85 才直接写入原会话；自动新建加路由说明；
 // 快路径不再自动承接正看着的会话，改为让人确认。
-export const ROUTER_V3_VERSION = 'v3.2-projconf-tiers.model-thread.thread-gate-t0.7.new-gate-direct-opus-k4w14';
+export const ROUTER_V3_VERSION = 'v3.2-projconf-tiers.model-thread.thread-gate-t0.5.new-gate-direct-opus-k4w14';
 
 export interface RouterV3Policy {
   model: string;
@@ -66,7 +70,7 @@ export const DEFAULT_POLICY_V3: RouterV3Policy = {
   minConfidence: 0.95,
   forkConfidence: 0.85,
   newConfidence: null,
-  threadConfidence: 0.7,
+  threadConfidence: 0.5,
   directThreadConfidence: 0.85,
   followupMinutes: 5,
   timeoutMs: 30000,

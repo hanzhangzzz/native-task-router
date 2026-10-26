@@ -318,8 +318,9 @@ export async function open(text: string, opts: OpenOptions): Promise<OpenOutcome
       const focusedSessionId = opts.focusedTty ? (live.find((l) => l.tty === opts.focusedTty)?.sessionId ?? null) : null;
       const r = await opts.router.route(text, { cards, live, previous: readPrevious(logPath, now()), focusedSessionId });
       decision = r;
-      const x = r as RouteDecision & { via?: string; project?: string | null; ranked?: unknown[] };
-      decisionLog = { source: 'router', kind: r.kind, model: r.model, latencyMs: r.latencyMs, costUsd: r.costUsd, reason: r.reason, via: x.via ?? null, project: x.project ?? null };
+      const x = r as RouteDecision & { via?: string; project?: string | null; ranked?: unknown[]; modelConfidence?: number | null; threadConfidence?: number | null };
+      // modelConfidence / threadConfidence 在 clarify 时也记：真实入口分布是调闸门的唯一依据（2026-10-26 起补记）
+      decisionLog = { source: 'router', kind: r.kind, model: r.model, latencyMs: r.latencyMs, costUsd: r.costUsd, reason: r.reason, via: x.via ?? null, project: x.project ?? null, modelConfidence: x.modelConfidence ?? null, threadConfidence: x.threadConfidence ?? null };
       if (r.kind !== 'clarify') Object.assign(decisionLog, { provider: r.provider, sessionId: r.kind === 'continue' ? r.sessionId : null, confidence: r.confidence, delivery: r.delivery ?? 'direct' });
     }
 
