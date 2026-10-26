@@ -4,5 +4,5 @@ import { claudeJsonComplete } from './claude-json.mjs';
 
 export const version = ROUTER_V3_VERSION;
 export const model = DEFAULT_POLICY_V3.model;
-export const notes = 'production createRouterV3: one call returns project + projectConfidence + thread + threadConfidence; tiers by project confidence, thread gate t=0.7; Opus via local `claude -p --output-format json`';
+export const notes = 'production createRouterV3: one call returns project + projectConfidence + thread + threadConfidence; tiers by project confidence, thread gate t=0.5; Opus via local `claude -p --output-format json`';
 export async function create() { return createRouterV3({ complete: claudeJsonComplete() }); }

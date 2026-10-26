@@ -140,7 +140,7 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
 
 // ---- 闸门：项目置信度分档；线程置信度 ≥t 才自动、≥0.85 才可能直接；NEW 不分叉 ----
 {
-  check('默认阈值：项目 direct 0.95、自动 0.85；NEW 跟随自动线；线程自动 0.7、直接 0.85', DEFAULT_POLICY_V3.minConfidence === 0.95 && DEFAULT_POLICY_V3.forkConfidence === 0.85 && DEFAULT_POLICY_V3.newConfidence === null && DEFAULT_POLICY_V3.threadConfidence === 0.7 && DEFAULT_POLICY_V3.directThreadConfidence === 0.85);
+  check('默认阈值：项目 direct 0.95、自动 0.85；NEW 跟随自动线；线程自动 0.5、直接 0.85', DEFAULT_POLICY_V3.minConfidence === 0.95 && DEFAULT_POLICY_V3.forkConfidence === 0.85 && DEFAULT_POLICY_V3.newConfidence === null && DEFAULT_POLICY_V3.threadConfidence === 0.5 && DEFAULT_POLICY_V3.directThreadConfidence === 0.85);
   const at = (conf, env = {}, target = [B, 'b1'], tconf = 0.9) => router(pick(target, conf, [], tconf), env).route(Q, ctx());
   const tier = (r) => (r.kind === 'clarify' ? 'clarify' : r.kind === 'new' ? 'new' : r.delivery);
   for (const [conf, want] of [[1, 'direct'], [0.95, 'direct'], [0.9499, 'fork'], [0.9, 'fork'], [0.85, 'fork'], [0.8499, 'clarify'], [0.5, 'clarify'], [0, 'clarify']]) {
@@ -149,9 +149,10 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
   }
   check('项目 0.97 但线程置信度 0.84 → 分叉（线程错只影响直接还是分叉）', tier(await at(0.97, {}, [B, 'b1'], 0.84)) === 'fork');
   check('项目 0.97、线程 0.85 → 直接', tier(await at(0.97, {}, [B, 'b1'], 0.85)) === 'direct');
-  const lowT = await at(0.97, {}, [B, 'b1'], 0.69);
-  check('线程置信度 0.69 < 0.7 → 确认（即使项目 0.97），候选首项仍是模型选的线程，第二项是同项目新开（不只给新目录）', lowT.kind === 'clarify' && lowT.holdReason === '对续哪条线程的把握不足' && lowT.ranked[0].sessionId === 'b1' && lowT.ranked[1].kind === 'new' && lowT.ranked[1].cwd === B);
-  check('线程 0.7、项目 0.9 → 分叉', tier(await at(0.9, {}, [B, 'b1'], 0.7)) === 'fork');
+  const lowT = await at(0.97, {}, [B, 'b1'], 0.49);
+  check('线程置信度 0.49 < 0.5 → 确认（即使项目 0.97），候选首项仍是模型选的线程，第二项是同项目新开（不只给新目录）', lowT.kind === 'clarify' && lowT.holdReason === '对续哪条线程的把握不足' && lowT.ranked[0].sessionId === 'b1' && lowT.ranked[1].kind === 'new' && lowT.ranked[1].cwd === B);
+  check('线程 0.5、项目 0.9 → 分叉（0.5 是新闸线）', tier(await at(0.9, {}, [B, 'b1'], 0.5)) === 'fork');
+  check('线程 0.69、项目 0.9 → 分叉（0.7→0.5 放宽进来的档，2026-10-26 前是 clarify）', tier(await at(0.9, {}, [B, 'b1'], 0.69)) === 'fork');
   check('线程置信度缺失 → 确认', tier(await router(async (req) => { const r = await pick([B, 'b1'], 0.99)(req); const j = JSON.parse(r.text); delete j.threadConfidence; return { ...r, text: JSON.stringify(j) }; }).route(Q, ctx())) === 'clarify');
   check('NTR_ROUTER_THREAD_CONFIDENCE=0：线程 0.3 也自动分叉', tier(await at(0.9, { NTR_ROUTER_THREAD_CONFIDENCE: '0' }, [B, 'b1'], 0.3)) === 'fork');
   check('NTR_ROUTER_THREAD_CONFIDENCE=0.9：线程 0.88、项目 0.97 → 确认', tier(await at(0.97, { NTR_ROUTER_THREAD_CONFIDENCE: '0.9' }, [B, 'b1'], 0.88)) === 'clarify');
@@ -160,10 +161,10 @@ check('版本号已升到 v3.2', ROUTER_V3_VERSION.startsWith('v3.2-'));
   const rn90 = await at(0.9, {}, [A, 'NEW'], 0.9);
   check('NEW 项目 0.90 → 确认（新建只在直接档），首选是项目内新建（入口预选）', rn90.kind === 'clarify' && !rn90.auto && rn90.holdReason === '新建只在最有把握时自动' && rn90.ranked[0].kind === 'new' && rn90.ranked[0].cwd === A);
   const rn = await at(0.96, {}, [A, 'NEW'], 0.75);
-  check('NEW 项目 0.96、线程 ≥0.7 → 自动新建，不分叉，路由说明由 open.ts 按置信度加', rn.kind === 'new' && rn.cwd === A && rn.delivery === 'direct' && rn.auto && rn.confidence === 0.96);
+  check('NEW 项目 0.96、线程 0.75 → 自动新建，不分叉，路由说明由 open.ts 按置信度加', rn.kind === 'new' && rn.cwd === A && rn.delivery === 'direct' && rn.auto && rn.confidence === 0.96);
   check('NEW 默认阈值跟随 NTR_ROUTER_MIN_CONFIDENCE：设 0.9 时 NEW 0.92 → 新建', tier(await at(0.92, { NTR_ROUTER_MIN_CONFIDENCE: '0.9' }, [A, 'NEW'])) === 'new');
-  const rnl = await at(0.97, {}, [A, 'NEW'], 0.6);
-  check('NEW：线程（该新开）把握 0.6 → 确认，首项为项目内新建', rnl.kind === 'clarify' && rnl.holdReason === '对是否该新开的把握不足' && rnl.ranked[0].kind === 'new' && rnl.ranked[0].cwd === A);
+  const rnl = await at(0.97, {}, [A, 'NEW'], 0.4);
+  check('NEW：线程（该新开）把握 0.4 → 确认，首项为项目内新建', rnl.kind === 'clarify' && rnl.holdReason === '对是否该新开的把握不足' && rnl.ranked[0].kind === 'new' && rnl.ranked[0].cwd === A);
   check('NTR_ROUTER_NEW_CONFIDENCE=0.9：NEW 0.9 → 新建、0.89 → 确认；续接 0.88 仍分叉', tier(await at(0.9, { NTR_ROUTER_NEW_CONFIDENCE: '0.9' }, [A, 'NEW'])) === 'new' && tier(await at(0.89, { NTR_ROUTER_NEW_CONFIDENCE: '0.9' }, [A, 'NEW'])) === 'clarify' && tier(await at(0.88, { NTR_ROUTER_NEW_CONFIDENCE: '0.9' })) === 'fork');
   check('NEW：项目 <0.85 → clarify', tier(await at(0.84, {}, [A, 'NEW'])) === 'clarify');
   const rnp = await at(0.96, {}, 'NEW_PROJECT');
