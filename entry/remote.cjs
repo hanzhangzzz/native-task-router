@@ -85,7 +85,12 @@ function createRemoteServer({ ntrHome, port, runCli, pageFile, trace, onTunnelSt
   const srv = http.createServer((req, res) => {
     const json = (code, o) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(o)); };
     if (req.url === '/' || req.url.startsWith('/?')) {
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store',
+        // 单文件页面：无外部资源需求；script/style 内联（非源文件加载），connect 只许同源
+        'content-security-policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'; form-action 'none'; base-uri 'none'",
+      });
       return res.end(fs.readFileSync(pageFile));
     }
     if (!req.url.startsWith('/api/')) return json(404, { error: 'not found' });
