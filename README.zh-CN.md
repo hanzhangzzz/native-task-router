@@ -132,6 +132,25 @@ npm start -- --wav x.wav           # 用 16kHz 单声道录音代替麦克风
 
 `NTR_MIC=<序号>` 换输入设备（`ffmpeg -f avfoundation -list_devices true -i ""` 列出序号）。App 在 `127.0.0.1:47615`（`NTR_VOICE_PORT`）接收这句话，只接受带 `~/.ntr/voice-token` 里口令的请求，网页发不进来。
 
+## 手机远程（用你自己的服务器）
+
+在菜单栏打开「手机远程」，同样的输入框、任务列表和批准选项就变成一个手机网页，任何网络都能打开：流量经一条反向隧道走到你自己的一台服务器，不依赖第三方服务，费用只有那台服务器本身。
+
+- App 在本机 `127.0.0.1:8765`（`NTR_REMOTE_PORT`）起一个小 HTTP 服务，并维持一条 SSH 反向隧道；服务器上的反向代理（Caddy 或 nginx，带 TLS）把它发布出去，比如 `https://ntr.example.com`。页面和所有接口都要带 `~/.ntr/remote/token` 里的令牌——菜单「手机远程 → 复制手机链接」给出带令牌的完整链接（令牌放在 URL 片段里，浏览器不会发给服务器）。连续 5 次错令牌锁定 30 秒。
+- 隧道钥匙只能做一件事：在服务器上绑一个内网口。公钥加到服务器时带上 `restrict,port-forwarding,permitlisten="<bind>:<port>"`（无 shell、无 pty）。反代跑在 Docker 里就绑 docker 网络的网关地址、防火墙只对该网桥放行这个端口；反代直接跑在宿主机上就绑 `127.0.0.1`，连 `GatewayPorts` 都不用改。Mac 侧服务只监听回环地址，本机没有任何对外监听的口。
+- 配置只有一个文件 `~/.ntr/remote/config.json`：
+
+```json
+{
+  "host": "your.server", "user": "you", "key": "/Users/you/.ntr/remote/id_ed25519",
+  "bind": "172.19.0.1", "bindPort": 8765, "url": "https://ntr.example.com"
+}
+```
+
+钥匙用 `ssh-keygen -t ed25519 -f ~/.ntr/remote/id_ed25519 -N ''` 生成，给 `ntr.example.com` 加解析指向服务器、反代加一段，然后在菜单栏打开「手机远程」，手机浏览器打开复制的链接、加到主屏即可。
+
+- TLS 在你的服务器上终结，服务器看得到流量内容——是你自己的机器，但信任模型就是这样，不是到 Mac 的端到端加密。手机链接当作密码一样保管。
+
 ## 它怎么工作
 
 ```
