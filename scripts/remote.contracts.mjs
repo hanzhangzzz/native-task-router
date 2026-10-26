@@ -36,6 +36,7 @@ const H = { authorization: `Bearer ${token}` };
 // 1. 页面与 404
 const page = await fetch(`${base}/`);
 check('GET / 返回手机页（含令牌门）', page.status === 200 && (await page.text()).includes('ntr-token'));
+check('页面带 CSP（无外部资源可达）', (page.headers.get('content-security-policy') || '').startsWith("default-src 'none'"));
 check('未知路径 404', (await fetch(`${base}/nope`, { headers: H })).status === 404);
 
 // 2. 认证：无令牌 401；错令牌 401；连续错 5 次锁 429（连对的也被拒），锁窗口过后恢复

@@ -87,7 +87,15 @@ function api(path, body) {
 function boot() { $('gate').hidden = true; $('main').hidden = false; render(); $('send').textContent = L.send; $('refresh').textContent = L.refresh; $('tasksHead').textContent = L.tasks; $('in').placeholder = L.ph; poll(); setInterval(() => document.visibilityState === 'visible' && poll(), 15000); }
 const label = (c) => c && c.card ? `${c.card.title || L.none} · ${c.card.project}` : (c && c.sessionId ? `${c.provider}:${c.card?.project || c.sessionId.slice(0, 8)}` : L.new);
 function render() {
-  $('target').innerHTML = target ? `<span class="chip"><b>${L.pick}：</b>${label(target)}<button onclick="window.__clearTarget()">✕</button></span>` : '';
+  const el = $('target');
+  el.textContent = '';
+  if (!target) return;
+  const chip = document.createElement('span'); chip.className = 'chip';
+  const b = document.createElement('b'); b.textContent = L.pick + '：';
+  const name = document.createElement('span'); name.textContent = label(target);   // 会话标题来自历史内容，只走 textContent，绝不进 innerHTML
+  const x = document.createElement('button'); x.textContent = '✕'; x.onclick = () => { target = null; render(); };
+  chip.append(b, name, x);
+  el.appendChild(chip);
 }
 window.__clearTarget = () => { target = null; render(); };
 function result(r) {
