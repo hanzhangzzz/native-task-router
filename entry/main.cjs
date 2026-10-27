@@ -8,7 +8,7 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const updater = require('./updater.cjs');
-const { createRemoteServer } = require('./remote.cjs');
+const { createAddonManager, validatePackage } = require('./addon.cjs');
 
 // 设置（快捷键、开机启动）存在 ~/.ntr/settings.json；环境变量 NTR_HOTKEY 优先（开发与测试用）
 const NTR_HOME = process.env.NTR_HOME || path.join(os.homedir(), '.ntr');
@@ -44,6 +44,7 @@ const T = {
     trayShow: (k) => `唤起输入框（${k}）`, trayHotkey: '修改快捷键…', trayLogin: '开机自动启动', trayQuit: '退出', hotkeyTitle: '修改快捷键',
     upCheck: '检查更新…', upTo: (v) => `更新到 ${v} 并重启`, upBusy: (v) => `正在更新到 ${v}…`,
     upLatest: (v) => `已是最新版本（${v}）`, upFound: (v, cur) => `发现新版本 ${v}（当前 ${cur}）`, upNow: '更新并重启', upNotes: '查看更新说明', upLater: '稍后',
+    addonInstall: '安装远程附加包…', addonRemove: '卸载远程附加包…', addonMissing: '附加包未加载，请重新安装', addonTrust: '这是一份可执行附加包，将使用本机权限运行。只安装可信来源；版本和文件校验不等于安全认证。安装后远程保持关闭，请在菜单中主动启用。', addonConfirm: '安装', addonCancel: '取消', addonInstalled: (v) => `附加包 ${v} 已安装，远程保持关闭。请在菜单中主动启用。`, addonDelete: '卸载将关闭附加功能并删除附加包；配置、令牌和任务历史会保留。', addonRemoved: '附加包已卸载，配置和历史已保留。', addonFailed: '附加包操作失败',
     upFailed: '更新失败', upCheckFailed: '检查更新失败', upManual: '打开下载页', ok: '好',
     trayVoice: (w) => `语音唤醒（说「${w}」）`, trayWake: '修改唤醒词…', wakeTitle: '修改唤醒词', wakeBad: '唤醒词要 3～6 个汉字', trayVoiceLoading: '语音唤醒：正在下载模型（约 130MB）…',
     voiceNoMic: '没有麦克风权限', voiceNoMicDetail: '在「系统设置 → 隐私与安全性 → 麦克风」里允许 Native Task Router，再打开语音唤醒。', voiceOpenSettings: '打开系统设置',
@@ -51,8 +52,6 @@ const T = {
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
     voiceTimeout: '没听到，下次再叫我', voiceDraft: '输入框里还有没发出去的话，这句接在后面了，回到电脑处理', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
-    trayRemote: '手机远程', rsOff: '已关闭', rsUp: '隧道已连接', rsConn: '隧道连接中…', rsDown: '隧道断开，重连中…', rsUnconf: '未配置（~/.ntr/remote/config.json，见 README「手机远程」）',
-    remoteCopy: '复制手机链接（含令牌）', remoteCopied: '已复制，在手机浏览器打开并加到主屏',
   },
   en: {
     untitled: '(untitled)', noOutput: 'no output', wrote: (p, l) => `Sent to ${p}: ${l}`,
@@ -62,6 +61,7 @@ const T = {
     trayShow: (k) => `Open input box (${k})`, trayHotkey: 'Change hotkey…', trayLogin: 'Open at login', trayQuit: 'Quit', hotkeyTitle: 'Change hotkey',
     upCheck: 'Check for updates…', upTo: (v) => `Update to ${v} and restart`, upBusy: (v) => `Updating to ${v}…`,
     upLatest: (v) => `You're on the latest version (${v})`, upFound: (v, cur) => `Version ${v} is available (you have ${cur})`, upNow: 'Update and restart', upNotes: 'Release notes', upLater: 'Later',
+    addonInstall: 'Install remote add-on…', addonRemove: 'Uninstall remote add-on…', addonMissing: 'Add-on failed to load; reinstall it', addonTrust: 'This executable add-on runs with local permissions. Install only from a trusted source. Version and file validation is not a security certification. Remote access stays off after installation; enable it from the menu.', addonConfirm: 'Install', addonCancel: 'Cancel', addonInstalled: (v) => `Add-on ${v} installed. Remote access stays off; enable it from the menu.`, addonDelete: 'Uninstall closes the add-on and removes its files. Configuration, tokens and task history are kept.', addonRemoved: 'Add-on uninstalled. Configuration and history were kept.', addonFailed: 'Add-on operation failed',
     upFailed: 'Update failed', upCheckFailed: "Couldn't check for updates", upManual: 'Open download page', ok: 'OK',
     trayVoice: (w) => `Voice wake (say "${w}")`, trayWake: 'Change wake word…', wakeTitle: 'Change wake word', wakeBad: 'Use 3–6 Chinese characters', trayVoiceLoading: 'Voice wake: downloading models (~130 MB)…',
     voiceNoMic: 'No microphone access', voiceNoMicDetail: 'Allow Native Task Router in System Settings → Privacy & Security → Microphone, then turn voice wake on again.', voiceOpenSettings: 'Open System Settings',
@@ -71,8 +71,6 @@ const T = {
     voiceTimeout: "Didn't hear anything.", voiceDraft: "The input box still had an unsent message, so this was added after it. Finish it at your computer.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
-    trayRemote: 'Mobile remote', rsOff: 'Off', rsUp: 'Tunnel connected', rsConn: 'Tunnel connecting…', rsDown: 'Tunnel down, reconnecting…', rsUnconf: 'Not configured (~/.ntr/remote/config.json — see README "Mobile remote")',
-    remoteCopy: 'Copy phone link (includes token)', remoteCopied: 'Copied. Open it in your phone browser and add to home screen',
   },
 };
 const t = () => T[LANG];
@@ -362,38 +360,38 @@ ipcMain.handle('tasks', () => new Promise((resolve) => {
   });
 }));
 
-// ---- 手机远程：127.0.0.1 服务 + 受限 SSH 反向隧道（配置见 ~/.ntr/remote/config.json，见 remote.cjs 头注释） ----
-let remote = null; // createRemoteServer 返回的实例；null = 关闭
-let remoteLastStatus = 'off';
-const RS = { off: 'rsOff', up: 'rsUp', connecting: 'rsConn', down: 'rsDown', unconfigured: 'rsUnconf' };
-async function startRemoteApp() {
-  if (remote) return;
-  remote = createRemoteServer({
-    ntrHome: NTR_HOME,
-    port: Number(process.env.NTR_REMOTE_PORT) || 8765,
-    runCli,
-    pageFile: path.join(__dirname, 'remote.html'),
-    trace,
-    onTunnelStatus: (s) => { remoteLastStatus = s; refreshTray(); },
-  });
-  remoteLastStatus = remote.config ? 'connecting' : 'unconfigured';
-  try { await remote.start(); } catch (e) {
-    console.error(`手机远程服务没有启动：${e.message}`);
-    trace({ ev: 'remote-server-error', error: String(e.message || e) });
-    remote.stop(); remote = null; remoteLastStatus = 'off';
-  }
-  refreshTray();
+// ---- Optional local add-on: the public host owns installation, not its transport. ----
+const addons = createAddonManager({ home: NTR_HOME, host: {
+  home: NTR_HOME, runCli, trace, language: () => LANG, refreshMenu: refreshTray,
+  settings: { load: loadSettings, save: saveSettings },
+  copyText: (text) => require('electron').clipboard.writeText(text),
+  notify: (message) => { void dialog.showMessageBox({ message }); },
+} });
+async function installAddon() {
+  try {
+    const chosen = await dialog.showOpenDialog({ title: t().addonInstall, properties: ['openDirectory'] });
+    if (chosen.canceled || !chosen.filePaths[0]) return;
+    const manifest = validatePackage(chosen.filePaths[0]);
+    const { response } = await dialog.showMessageBox({ type: 'warning', message: `Remote add-on ${manifest.version}`, detail: t().addonTrust, buttons: [t().addonCancel, t().addonConfirm], defaultId: 0, cancelId: 0 });
+    if (response !== 1) return;
+    const installed = await addons.install(chosen.filePaths[0]);
+    refreshTray();
+    void dialog.showMessageBox({ message: t().addonInstalled(installed.version) });
+  } catch (e) { refreshTray(); void dialog.showMessageBox({ type: 'error', message: t().addonFailed, detail: String(e.message || e) }); }
 }
-function stopRemoteApp() { remote?.stop(); remote = null; remoteLastStatus = 'off'; refreshTray(); }
-function remoteItems() {
-  const enabled = !!remote;
-  const items = [{ label: t().trayRemote, type: 'checkbox', checked: enabled, click: (i) => { saveSettings({ remoteMobile: i.checked }); if (i.checked) void startRemoteApp(); else stopRemoteApp(); } }];
-  if (enabled) {
-    items.push({ label: t()[RS[remoteLastStatus] || 'rsOff'], enabled: false });
-    const url = remote.mobileUrl();
-    if (url) items.push({ label: t().remoteCopy, click: () => { require('electron').clipboard.writeText(url); dialog.showMessageBox({ message: t().remoteCopied }); } });
-  }
-  return items;
+async function uninstallAddon() {
+  const { response } = await dialog.showMessageBox({ type: 'warning', message: t().addonRemove, detail: t().addonDelete, buttons: [t().addonCancel, t().addonRemove], defaultId: 0, cancelId: 0 });
+  if (response !== 1) return;
+  try { addons.uninstall(); refreshTray(); void dialog.showMessageBox({ message: t().addonRemoved }); }
+  catch (e) { void dialog.showMessageBox({ type: 'error', message: t().addonFailed, detail: String(e.message || e) }); }
+}
+function addonItems() {
+  return [
+    ...addons.menuItems(),
+    ...(addons.present() && !addons.info() ? [{ label: t().addonMissing, enabled: false }] : []),
+    { label: t().addonInstall, click: () => void installAddon() },
+    ...(addons.present() ? [{ label: t().addonRemove, click: () => void uninstallAddon() }] : []),
+  ];
 }
 
 // ---- 快捷键（可在菜单栏修改，被占用时退回原来的） ----
@@ -498,7 +496,7 @@ function refreshTray() {
     { label: t().trayHotkey, click: openHotkeyWindow },
     voiceItem(),
     { label: t().trayWake, click: openWakeWindow },
-    ...remoteItems(),
+    ...addonItems(),
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
     { label: `Native Task Router ${app.getVersion()}`, enabled: false },
@@ -530,7 +528,8 @@ app.whenReady().then(async () => {
   }
   refreshTray();
   if (loadSettings().voiceWake) void startVoice();
-  if (loadSettings().remoteMobile) void startRemoteApp();
+  try { await addons.load(); } catch (e) { trace({ ev: 'addon-load-error', error: String(e.message || e) }); }
+  refreshTray();
   // 启动 10 秒后查一次新版本，之后每 6 小时一次；只点亮菜单，不打扰
   if (app.isPackaged) { setTimeout(() => void checkUpdate(false), 10_000); setInterval(() => void checkUpdate(false), 6 * 3600_000); }
   if (!registerHotkey(HOTKEY)) {
@@ -581,4 +580,4 @@ function controlFromStdin() {
   });
 }
 app.on('window-all-closed', () => { /* 常驻：没有窗口也不退出 */ });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); listener?.kill(); remote?.stop(); });
+app.on('will-quit', () => { globalShortcut.unregisterAll(); listener?.kill(); addons.dispose(); });
