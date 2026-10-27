@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('ntr', {
   cancel: () => ipcRenderer.send('cancel'),
   tasks: () => ipcRenderer.invoke('tasks'),
   lang: () => ipcRenderer.invoke('lang'),
+  skin: () => ipcRenderer.invoke('skin'),
+  onSkin: (cb) => ipcRenderer.on('skin', (_e, id) => cb(id)),
   getHotkey: () => ipcRenderer.invoke('get-hotkey'),
   setHotkey: (acc) => ipcRenderer.invoke('set-hotkey', acc),
   getWake: () => ipcRenderer.invoke('get-wake'),

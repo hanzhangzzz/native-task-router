@@ -339,6 +339,25 @@ try {
   check('数字键选第 1 项（无正文）→ 只答题不送正文', JSON.stringify(cq) === JSON.stringify(['open', '--json', '--pick', 'claude:H5', '--answer', '1']), JSON.stringify(cq));
   for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).lastAction === 'answered') break; }
   check('只答题 → 显示已选', (await probe()).lastAction === 'answered');
+
+  // ---- 9. 皮肤：菜单选择写进 settings.json，界面立即换上；每套截一张任务列表 ----
+  check('默认皮肤 aurora', (await probe()).skin === 'aurora');
+  for (const id of ['aurora', 'neon', 'crt', 'daylight', 'ember', 'candy', 'comic', 'pixel']) {
+    send({ cmd: 'skin', id });
+    await sleep(800);
+    send({ cmd: 'type', text: '' });
+    await key('ArrowLeft');
+    for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
+    const ps = await probe();
+    const saved = JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')).skin;
+    check(`换成 ${id}：界面生效、已保存、任务列表正常`, ps.skin === id && saved === id && ps.mode === 'tasks' && ps.items.length === 5, JSON.stringify({ skin: ps.skin, saved, mode: ps.mode, n: ps.items.length }));
+    send({ cmd: 'shot', file: path.join(D, `9-skin-${id}.png`) });
+    await sleep(300);
+    await key('Escape');
+  }
+  send({ cmd: 'skin', id: 'no-such-skin' });
+  await sleep(300);
+  check('未知皮肤名被忽略', JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')).skin === 'pixel');
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {
