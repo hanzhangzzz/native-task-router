@@ -123,24 +123,13 @@ npm start -- --wav x.wav           # a 16 kHz mono recording instead of the micr
 
 `NTR_MIC=<index>` picks another input (`ffmpeg -f avfoundation -list_devices true -i ""` lists them). The app takes the sentence on `127.0.0.1:47615` (`NTR_VOICE_PORT`) and only accepts requests that carry the token in `~/.ntr/voice-token`, so web pages can't post to it.
 
-## Mobile remote (your own server)
+## Optional remote add-on
 
-Turn on **Mobile remote** in the menu bar and the same input box, task list and approval options become a small page you open from any phone. It travels through a tunnel to a server you control, so it works from any network and costs nothing beyond that server.
+The public repository and app are a complete local desktop product: input box, session index, routing, native terminal delivery, local voice and updates build and run independently. Starting with 0.14.0, the phone page, remote bridge, authentication and relay implementation belong to a separate private add-on and are absent from public source and app packages.
 
-- The app runs a small HTTP service on `127.0.0.1:8765` (`NTR_REMOTE_PORT`) and keeps one SSH reverse tunnel to your server; a reverse proxy there (Caddy or nginx, with TLS) publishes it, e.g. `https://ntr.example.com`. The page and every API call require the token in `~/.ntr/remote/token` — **Mobile remote → Copy phone link** gives the full URL with the token in the URL fragment (which browsers never send to the server). Five wrong tokens lock the endpoint for 30 s.
-- The tunnel key can do exactly one thing: bind one internal port on your server. On the server, add the public key with `restrict,port-forwarding,permitlisten="<bind>:<port>"` (no shell, no pty). If your reverse proxy runs in Docker, bind the docker network's gateway address and allow that port on that bridge interface only; if the proxy runs on the host itself, `127.0.0.1` works and you don't need `GatewayPorts`. The Mac service binds loopback only — nothing on your Mac is reachable from outside.
-- Setup is one config file, `~/.ntr/remote/config.json`:
+Obtain the add-on from a trusted source, extract it, then choose **Install remote add-on…** from the app menu and select its directory. It executes with local permissions; format and version validation are not a security certification. Remote access stays off after every successful install or update. Enable it explicitly from the menu; later normal launches restore the setting you enabled.
 
-```json
-{
-  "host": "your.server", "user": "you", "key": "/Users/you/.ntr/remote/id_ed25519",
-  "bind": "172.19.0.1", "bindPort": 8765, "url": "https://ntr.example.com"
-}
-```
-
-Generate the key with `ssh-keygen -t ed25519 -f ~/.ntr/remote/id_ed25519 -N ''`, point DNS for `ntr.example.com` at your server, add the reverse-proxy block, then enable it in the menu bar, open the copied link on your phone and add it to the home screen.
-
-- TLS ends at your server, so the server can see the traffic — it's your own machine, but that's the trust model; nothing is encrypted end-to-end to the Mac. Treat the phone link like a password.
+Before upgrading from 0.13.3 or an earlier integrated version, obtain the add-on. Without it the app provides local features only. Existing remote configuration, tokens and task history are kept. The add-on lives outside the app bundle and survives local app updates; uninstalling it also keeps configuration and history. Historical public source, tags and releases remain available.
 
 ## How it works
 
