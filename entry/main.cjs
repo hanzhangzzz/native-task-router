@@ -24,6 +24,9 @@ const saveSettings = (patch) => {
   return next;
 };
 let HOTKEY = process.env.NTR_HOTKEY || loadSettings().hotkey || DEFAULT_HOTKEY;
+// 输入框皮肤：样式全在 index.html（html[data-skin]），这里只存选择；第一项是默认
+const SKINS = ['aurora', 'neon', 'crt', 'daylight', 'ember', 'candy', 'comic', 'pixel'];
+const skin = () => (SKINS.includes(loadSettings().skin) ? loadSettings().skin : SKINS[0]);
 const prettyKey = (acc) => acc.replace(/Command\+|Cmd\+/g, '⌘').replace(/Control\+|Ctrl\+/g, '⌃').replace(/Alt\+|Option\+/g, '⌥').replace(/Shift\+/g, '⇧');
 // NTR_ENTRY_CLI 只给界面验收用（换成返回固定结果的桩，不碰真实会话）
 const CLI = process.env.NTR_ENTRY_CLI || path.join(__dirname, '..', 'src', 'layers', 'cli.ts');
@@ -51,6 +54,7 @@ const T = {
     voiceFailed: '语音唤醒没能启动',
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
     voiceTimeout: '没听到，下次再叫我', voiceDraft: '输入框里还有没发出去的话，这句接在后面了，回到电脑处理', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
+    traySkin: '皮肤', skins: { aurora: '极光（默认）', neon: '霓虹', crt: '荧光终端', daylight: '晴空 · 亮色', ember: '暖炉 · 暖色', candy: '糖果 · 卡通', comic: '漫画 · 卡通', pixel: '像素 · 卡通' },
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
@@ -70,6 +74,7 @@ const T = {
     voiceClarifyBox: 'Not sure where this goes. The options are in the input box; pick one at your computer.',
     voiceTimeout: "Didn't hear anything.", voiceDraft: "The input box still had an unsent message, so this was added after it. Finish it at your computer.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
+    traySkin: 'Skin', skins: { aurora: 'Aurora (default)', neon: 'Neon', crt: 'Phosphor', daylight: 'Daylight · light', ember: 'Ember · warm', candy: 'Candy · cartoon', comic: 'Comic · cartoon', pixel: 'Pixel · cartoon' },
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
 };
@@ -422,6 +427,15 @@ function openHotkeyWindow() {
 }
 ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.NTR_HOTKEY, lang: LANG }));
 ipcMain.handle('lang', () => LANG);
+ipcMain.handle('skin', () => skin());
+// 换皮肤后立刻唤起输入框，所见即所选
+function setSkin(id) {
+  if (!SKINS.includes(id)) return;
+  saveSettings({ skin: id });
+  win?.webContents.send('skin', id);
+  refreshTray();
+  void show();
+}
 // macOS 系统保留的组合：Electron 注册它们不会报错，而是直接把 Spotlight / 输入法切换等抢走（2026-10-17 实测 ⌘Space）
 const SYSTEM_RESERVED = new Set([
   'Command+Space', 'Control+Space', 'Command+Alt+Space', 'Control+Alt+Command+Space', 'Command+Tab', 'Command+Shift+Tab',
@@ -496,6 +510,7 @@ function refreshTray() {
     { label: t().trayHotkey, click: openHotkeyWindow },
     voiceItem(),
     { label: t().trayWake, click: openWakeWindow },
+    { label: t().traySkin, submenu: SKINS.map((id) => ({ label: t().skins[id], type: 'radio', checked: id === skin(), click: () => setSkin(id) })) },
     ...addonItems(),
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
@@ -576,6 +591,7 @@ function controlFromStdin() {
     else if (m.cmd === 'voice') voiceItem().click({ checked: !!m.on });
     else if (m.cmd === 'voiceEvent') voiceEvent(m.ev);
     else if (m.cmd === 'openWake') openWakeWindow();
+    else if (m.cmd === 'skin') setSkin(String(m.id));
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await target(m).webContents.capturePage()).toPNG());
   });
 }
