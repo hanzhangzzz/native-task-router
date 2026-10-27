@@ -1,6 +1,6 @@
 {
   "name": "native-task-router",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "private": true,
   "type": "module",
   "description": "说一句话，路由到你本机正确的 Claude Code / Codex 原生会话，在你自己的 iTerm / Terminal 里续上",
