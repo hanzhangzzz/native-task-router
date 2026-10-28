@@ -110,6 +110,17 @@
   @keyframes blink { 50% { opacity: .3; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
+  /* 选皮肤：顶部一排皮肤名，当前预览的高亮；下面是示例任务列表 */
+  #skins { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; font-size: 12px; }
+  #skins[hidden] { display: none; }
+  #skins .lb { color: var(--faint); margin-right: 2px; }
+  #skins .sk { padding: 2px 9px; border-radius: 999px; background: var(--kbd); color: var(--kbd-fg); transition: background .2s, color .2s; }
+  #skins .sk.on { background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
+  #skins .demo { margin-left: auto; color: var(--faint); }
+  [data-skin=crt], [data-skin=pixel] { --on-accent: #03190a; }
+  [data-skin=neon] #skins .sk, [data-skin=crt] #skins .sk, [data-skin=pixel] #skins .sk { border-radius: 0; }
+  [data-skin=comic] #skins .sk { box-shadow: 0 0 0 1.5px #111; font-weight: 700; }
+
   /* ---- aurora 极光（默认）：深色玻璃，背后缓慢漂移的极光 ---- */
   :root:not([data-skin]) #fx, [data-skin=aurora] #fx { inset: -30%; filter: blur(46px); opacity: .3; will-change: transform;
     background: radial-gradient(30% 30% at 20% 20%, #6d7cff, transparent 70%), radial-gradient(30% 30% at 80% 30%, #ff6fb1, transparent 70%), radial-gradient(35% 35% at 50% 85%, #3ad0ff, transparent 70%);
@@ -330,6 +341,7 @@
 </style>
 <div id="box">
   <div id="fx"></div>
+  <div id="skins" hidden></div>
   <div id="target" hidden></div>
   <div class="row"><span class="mark">›_</span><textarea id="in" rows="1" autofocus autocomplete="off" spellcheck="false"></textarea></div>
   <div id="msg"></div>
@@ -339,7 +351,7 @@
 </div>
 <script>
   const $ = (id) => document.getElementById(id);
-  const input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box'), filter = $('filter');
+  const skinsEl = $('skins'), input = $('in'), msg = $('msg'), list = $('list'), hint = $('hint'), targetEl = $('target'), box = $('box'), filter = $('filter');
   const MAX_INPUT_PX = 220;
   // 界面文案：语言由主进程决定（NTR_LANG 或 macOS 首选语言）；路由原因按已知文本翻译，未知的不显示原文
   const I18N = {
@@ -354,6 +366,16 @@
       state: { idle: '空闲', busy: '运行中', waiting: '等待中', unknown: '状态未知' }, whoIt: '它', whoYou: '你',
       apState: '等批准', apDefault: '确认当前高亮项', apNoQ: '任务在等批准，选一下：',
       apKeys: [['↑↓ 1–9', '选择'], ['↵', '确认'], ['Esc', '返回']],
+      skinLabel: '皮肤', skinDemo: '示例预览', skinKeys: (n) => [['← →', '换皮肤'], [`1–${n}`, '直选'], ['↑↓', '试试选择'], ['↵', '使用'], ['Esc', '取消']],
+      // 选皮肤时预览用的示例任务（虚构），覆盖运行中、等批准、空闲、未知、最近各种状态
+      sample: [
+        { title: '重构支付模块的重试逻辑', project: 'shop-api', provider: 'claude', state: 'busy', reply: '正在给并发场景补测试…' },
+        { title: '修复深色模式下的图表配色', project: 'dashboard', provider: 'codex', state: 'waiting', prompt: { context: '$ npm install chart-lib@5', question: '允许执行吗？' } },
+        { title: '给 CLI 加 --json 输出', project: 'devtools', provider: 'claude', state: 'idle', reply: '已完成，42 项测试全部通过。' },
+        { title: '排查 CI 偶发超时', project: 'infra', provider: 'claude', state: 'unknown', reply: '已加计时日志，等下一次复现。' },
+        { title: '整理 v2 迁移文档', project: 'docs-site', provider: 'codex', last: '补充回滚步骤', mins: 3 },
+        { title: '调研全文检索方案', project: 'notes', provider: 'claude', last: '对比 FTS5 和外部索引的体积', mins: 180 },
+      ],
       ago: (m) => (m < 60 ? `${Math.max(1, m)} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`),
       vListening: '🎙 在听，说你要派的活…', vCountdown: (n) => `🎙 ${n} 秒后发送 · 任意键修改 · Esc 取消`,
       vDraft: '🎙 框里原有没发出去的话，语音这句接在后面，不自动发送', vTimeout: '🎙 没听到',
@@ -377,6 +399,15 @@
       state: { idle: 'idle', busy: 'working', waiting: 'waiting', unknown: 'unknown' }, whoIt: 'Agent', whoYou: 'You',
       apState: 'approval', apDefault: 'Confirm the highlighted option', apNoQ: 'A task is waiting for your approval:',
       apKeys: [['↑↓ 1–9', 'select'], ['↵', 'confirm'], ['Esc', 'back']],
+      skinLabel: 'Skin', skinDemo: 'Sample preview', skinKeys: (n) => [['← →', 'switch'], [`1–${n}`, 'pick'], ['↑↓', 'try selecting'], ['↵', 'use'], ['Esc', 'cancel']],
+      sample: [
+        { title: 'Refactor payment retry logic', project: 'shop-api', provider: 'claude', state: 'busy', reply: 'Adding tests for concurrent retries…' },
+        { title: 'Fix chart colors in dark mode', project: 'dashboard', provider: 'codex', state: 'waiting', prompt: { context: '$ npm install chart-lib@5', question: 'Allow this command?' } },
+        { title: 'Add --json output to the CLI', project: 'devtools', provider: 'claude', state: 'idle', reply: 'Done. All 42 tests pass.' },
+        { title: 'Investigate flaky CI timeouts', project: 'infra', provider: 'claude', state: 'unknown', reply: 'Added timing logs; waiting for the next failure.' },
+        { title: 'Write the v2 migration guide', project: 'docs-site', provider: 'codex', last: 'Add rollback steps', mins: 3 },
+        { title: 'Compare full-text search options', project: 'notes', provider: 'claude', last: 'Compare FTS5 with an external index', mins: 180 },
+      ],
       ago: (m) => (m < 60 ? `${Math.max(1, m)}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`),
       vListening: '🎙 Listening. Say your task…', vCountdown: (n) => `🎙 Sending in ${n}s · any key to edit · Esc to cancel`,
       vDraft: "🎙 The box already had an unsent message; this was added after it and won't send by itself", vTimeout: "🎙 Didn't hear anything",
@@ -386,9 +417,24 @@
   input.placeholder = '';
   window.ntr.lang().then((l) => { S = I18N[l] || I18N.zh; input.placeholder = S.placeholder; render(); });
   // 皮肤：菜单栏「皮肤」里选，存在 settings.json；换了立即重排（各皮肤内边距不同，窗口高度跟着变）
+  // 选皮肤（菜单栏「选择皮肤…」）：← → 实时把整个框换成那套皮肤并摆出示例任务列表，回车才保存；Esc、框被关掉都恢复原皮肤
+  let skins = [], skinNow = 'aurora', pick = null; // pick：选皮肤中，{ i } 是正在预览的第几套
   const applySkin = (id) => { document.documentElement.dataset.skin = id; render(); };
-  window.ntr.skin().then(applySkin);
-  window.ntr.onSkin(applySkin);
+  window.ntr.skin().then((s) => { skins = s.skins; skinNow = s.current; applySkin(s.current); });
+  window.ntr.onSkin((id) => { skinNow = id; applySkin(id); });
+  window.ntr.onSkinPick(() => {
+    if (inflight || !skins.length) return;
+    pick = { i: Math.max(0, skins.findIndex((x) => x.id === skinNow)) };
+    items = S.sample.map((x, n) => ({ kind: 'session', provider: x.provider, sessionId: 'demo' + n, state: x.state,
+      card: { title: x.title, project: x.project, reply: x.reply || null, last: x.last || null, updatedAt: x.mins ? new Date(Date.now() - x.mins * 60000).toISOString() : null },
+      ...(x.prompt ? { prompt: x.prompt } : {}) }));
+    mode = 'skin'; sel = 0; input.disabled = true; say('');
+    filter.value = ''; filter.placeholder = S.filterPh;
+    render();
+  });
+  const previewSkin = (i) => { pick.i = (i + skins.length) % skins.length; applySkin(skins[pick.i].id); };
+  // 离开选皮肤（任何路径）：没保存就回到已保存的皮肤；调用方负责重排
+  const endSkinPick = () => { if (!pick) return; pick = null; document.documentElement.dataset.skin = skinNow; };
 
   // mode: input（打字）| busy（等待结果）| choose（拿不准，选去处）| tasks（← 任务列表）| approve（目标停在审批/选择框，替它选）
   let mode = 'input', items = [], sel = 0, text = '', target = null;
@@ -510,10 +556,13 @@
     for (const c of [...list.children]) if (c !== hl) c.remove();
     list.classList.remove('scroll');
     rowN = 0;
-    filter.hidden = mode !== 'tasks';
+    filter.hidden = mode !== 'tasks' && mode !== 'skin';
     if (mode === 'tasks') {
       renderTasks();
       hint.innerHTML = S.taskKeys(!!input.value.trim()).map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
+    } else if (mode === 'skin') {
+      renderTasks();
+      hint.innerHTML = S.skinKeys(skins.length).map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
     } else if (mode === 'approve') {
       items.forEach((it, i) => row(i, { title: it.label }));
       hint.innerHTML = S.apKeys.map(([k, v]) => `<span><kbd>${k}</kbd>${v}</span>`).join('');
@@ -531,6 +580,13 @@
     list.classList.toggle('none', empty);
     if (wasEmpty && !empty) { list.classList.add('enter'); clearTimeout(enterTimer); enterTimer = setTimeout(() => list.classList.remove('enter'), 700); }
     placeHl();
+    skinsEl.hidden = mode !== 'skin';
+    if (mode === 'skin') {
+      skinsEl.textContent = '';
+      skinsEl.appendChild(el('span', 'lb', S.skinLabel));
+      skins.forEach((x, i) => skinsEl.appendChild(el('span', i === pick.i ? 'sk on' : 'sk', x.name)));
+      skinsEl.appendChild(el('span', 'demo', S.skinDemo));
+    }
     targetEl.hidden = !target;
     if (target) {
       targetEl.textContent = S.to + sessionLabel(target);
@@ -540,11 +596,13 @@
   }
 
   function reset() {
+    endSkinPick();
     mode = 'input'; items = []; sel = 0; text = ''; target = null; lastAction = null;
     input.value = ''; input.disabled = false; say('');
     grow(); render(); input.focus();
   }
   const backToInput = (value) => {
+    endSkinPick();
     mode = 'input'; items = []; sel = 0; input.disabled = false; say('');
     if (value !== undefined) input.value = value;
     grow(); render(); input.focus();
@@ -554,7 +612,7 @@
   // 请求还在路上时不动界面，结果回来照常显示（拿不准的候选不能因为重开窗口而丢掉）。
   function onShow() {
     if (inflight) return void reportSize();
-    if (mode === 'input' || mode === 'tasks') return backToInput();
+    if (mode === 'input' || mode === 'tasks' || mode === 'skin') return backToInput();
     // 再次唤起：选项框可能已经过时（人在终端里处理过），拿不准/审批都退回输入，没发出去的话原样保留
     if (mode === 'choose' || mode === 'approve' || lastAction === 'failed') return backToInput(input.value);
     reset();
@@ -693,6 +751,15 @@
     if (e.isComposing || e.keyCode === 229) return; // 输入法组字中，回车/方向键交给输入法
     const k = e.key;
     if (voice) { voiceEnd(); say(''); } // 语音这一轮里按了键：人在电脑前，停下倒计时，这个键照常生效
+    if (mode === 'skin') {
+      e.preventDefault();
+      if (k === 'Escape') return backToInput();
+      if (k === 'Enter') { skinNow = skins[pick.i].id; window.ntr.setSkin(skinNow); return backToInput(); }
+      if (k === 'ArrowLeft' || k === 'ArrowRight') return previewSkin(pick.i + (k === 'ArrowRight' ? 1 : -1));
+      if (/^[1-9]$/.test(k) && skins[Number(k) - 1]) return previewSkin(Number(k) - 1);
+      if (k === 'ArrowDown' || k === 'ArrowUp') { sel = (sel + (k === 'ArrowDown' ? 1 : -1) + items.length) % items.length; render(); }
+      return;
+    }
     if (k === 'Escape') {
       e.preventDefault();
       if (mode === 'tasks') { if (filter.value) { filter.value = ''; filterTasks(); return render(); } return closeList(); }
