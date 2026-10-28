@@ -340,24 +340,43 @@ try {
   for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).lastAction === 'answered') break; }
   check('只答题 → 显示已选', (await probe()).lastAction === 'answered');
 
-  // ---- 9. 皮肤：菜单选择写进 settings.json，界面立即换上；每套截一张任务列表 ----
+  // ---- 9. 皮肤：菜单「选择皮肤…」在框里预览示例任务列表，← → 实时换皮肤，回车才保存，Esc 恢复 ----
+  const savedSkin = () => { try { return JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')).skin ?? null; } catch { return null; } };
   check('默认皮肤 aurora', (await probe()).skin === 'aurora');
-  for (const id of ['aurora', 'neon', 'crt', 'daylight', 'ember', 'candy', 'comic', 'pixel']) {
-    send({ cmd: 'skin', id });
-    await sleep(800);
-    send({ cmd: 'type', text: '' });
-    await key('ArrowLeft');
-    for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
-    const ps = await probe();
-    const saved = JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')).skin;
-    check(`换成 ${id}：界面生效、已保存、任务列表正常`, ps.skin === id && saved === id && ps.mode === 'tasks' && ps.items.length === 5, JSON.stringify({ skin: ps.skin, saved, mode: ps.mode, n: ps.items.length }));
-    send({ cmd: 'shot', file: path.join(D, `9-skin-${id}.png`) });
+  await show(); // 上一段停在已送达的结果上；先像平常一样唤起回到输入，再打一句没发的话
+  send({ cmd: 'type', text: '选皮肤前没发的话' });
+  send({ cmd: 'skinPick' });
+  await sleep(800);
+  let sk = await probe();
+  check('选择皮肤… → 框里摆出 6 项示例任务、当前 aurora', sk.mode === 'skin' && sk.items.length === 6 && sk.skin === 'aurora', JSON.stringify(sk));
+  const ids = ['aurora', 'neon', 'crt', 'daylight', 'ember', 'candy', 'comic', 'pixel'];
+  for (let i = 0; i < ids.length; i++) {
+    if (i) await key('ArrowRight');
+    await sleep(500);
+    sk = await probe();
+    check(`→ 预览 ${ids[i]}：界面换上、未保存`, sk.skin === ids[i] && sk.mode === 'skin' && savedSkin() === null, JSON.stringify({ skin: sk.skin, saved: savedSkin() }));
+    send({ cmd: 'shot', file: path.join(D, `9-skin-${ids[i]}.png`) });
     await sleep(300);
-    await key('Escape');
   }
+  await key('Escape');
+  sk = await probe();
+  check('Esc → 恢复 aurora、未保存、原话还在', sk.skin === 'aurora' && savedSkin() === null && sk.mode === 'input' && sk.value === '选皮肤前没发的话', JSON.stringify(sk));
+  send({ cmd: 'skinPick' });
+  await sleep(800);
+  await key('7');
+  await key('Enter');
+  await sleep(300);
+  sk = await probe();
+  check('数字 7 + 回车 → 保存 comic、回到输入', sk.skin === 'comic' && savedSkin() === 'comic' && sk.mode === 'input', JSON.stringify({ skin: sk.skin, saved: savedSkin(), mode: sk.mode }));
+  send({ cmd: 'type', text: '' });
+  await key('ArrowLeft');
+  for (let i = 0; i < 30; i++) { await sleep(150); if ((await probe()).items.length) break; }
+  sk = await probe();
+  check('保存后真实任务列表用新皮肤', sk.mode === 'tasks' && sk.items.length === 5 && sk.skin === 'comic', JSON.stringify(sk));
+  await key('Escape');
   send({ cmd: 'skin', id: 'no-such-skin' });
   await sleep(300);
-  check('未知皮肤名被忽略', JSON.parse(fs.readFileSync(path.join(HOME, 'settings.json'), 'utf8')).skin === 'pixel');
+  check('未知皮肤名被忽略', savedSkin() === 'comic');
 } catch (e) {
   check('脚本异常', false, e.stack);
 } finally {

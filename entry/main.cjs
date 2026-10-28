@@ -54,7 +54,7 @@ const T = {
     voiceFailed: '语音唤醒没能启动',
     voiceClarify: '拿不准送到哪，已放进输入框，回到电脑按快捷键确认', voiceClarifyBox: '拿不准送到哪，候选列在输入框里，回到电脑选一下',
     voiceTimeout: '没听到，下次再叫我', voiceDraft: '输入框里还有没发出去的话，这句接在后面了，回到电脑处理', voiceClarifyBusy: '拿不准送到哪，输入框里还有没发出去的话，这句没放进去，回到电脑再说一次',
-    traySkin: '皮肤', skins: { aurora: '极光（默认）', neon: '霓虹', crt: '荧光终端', daylight: '晴空 · 亮色', ember: '暖炉 · 暖色', candy: '糖果 · 卡通', comic: '漫画 · 卡通', pixel: '像素 · 卡通' },
+    traySkin: (n) => `选择皮肤…（当前：${n}）`, skins: { aurora: '极光', neon: '霓虹', crt: '荧光终端', daylight: '晴空', ember: '暖炉', candy: '糖果', comic: '漫画', pixel: '像素' },
     hkEmpty: '快捷键为空', hkReserved: (k) => `${k} 是系统保留的快捷键（如 Spotlight、输入法切换），请换一个`, hkTaken: (k) => `${k} 注册失败（可能被别的应用占用）`,
   },
   en: {
@@ -74,7 +74,7 @@ const T = {
     voiceClarifyBox: 'Not sure where this goes. The options are in the input box; pick one at your computer.',
     voiceTimeout: "Didn't hear anything.", voiceDraft: "The input box still had an unsent message, so this was added after it. Finish it at your computer.",
     voiceClarifyBusy: "Not sure where this goes, and the input box still has an unsent message, so this one wasn't kept. Say it again at your computer.",
-    traySkin: 'Skin', skins: { aurora: 'Aurora (default)', neon: 'Neon', crt: 'Phosphor', daylight: 'Daylight · light', ember: 'Ember · warm', candy: 'Candy · cartoon', comic: 'Comic · cartoon', pixel: 'Pixel · cartoon' },
+    traySkin: (n) => `Choose skin… (now: ${n})`, skins: { aurora: 'Aurora', neon: 'Neon', crt: 'Phosphor', daylight: 'Daylight', ember: 'Ember', candy: 'Candy', comic: 'Comic', pixel: 'Pixel' },
     hkEmpty: 'Hotkey is empty', hkReserved: (k) => `${k} is reserved by macOS (Spotlight, input sources). Pick another one.`, hkTaken: (k) => `${k} could not be registered (another app may be using it).`,
   },
 };
@@ -427,14 +427,19 @@ function openHotkeyWindow() {
 }
 ipcMain.handle('get-hotkey', () => ({ hotkey: HOTKEY, pretty: prettyKey(HOTKEY), fromEnv: !!process.env.NTR_HOTKEY, lang: LANG }));
 ipcMain.handle('lang', () => LANG);
-ipcMain.handle('skin', () => skin());
-// 换皮肤后立刻唤起输入框，所见即所选
+// 皮肤表与当前皮肤都以这里为准；输入框里选皮肤（← → 实时预览示例任务列表），回车才 set-skin 保存
+ipcMain.handle('skin', () => ({ current: skin(), skins: SKINS.map((id) => ({ id, name: t().skins[id] })) }));
 function setSkin(id) {
-  if (!SKINS.includes(id)) return;
+  if (!SKINS.includes(id)) return false;
   saveSettings({ skin: id });
   win?.webContents.send('skin', id);
   refreshTray();
-  void show();
+  return true;
+}
+ipcMain.handle('set-skin', (_e, id) => setSkin(String(id)));
+async function pickSkin() {
+  await show();
+  win.webContents.send('skin-pick');
 }
 // macOS 系统保留的组合：Electron 注册它们不会报错，而是直接把 Spotlight / 输入法切换等抢走（2026-10-17 实测 ⌘Space）
 const SYSTEM_RESERVED = new Set([
@@ -510,7 +515,7 @@ function refreshTray() {
     { label: t().trayHotkey, click: openHotkeyWindow },
     voiceItem(),
     { label: t().trayWake, click: openWakeWindow },
-    { label: t().traySkin, submenu: SKINS.map((id) => ({ label: t().skins[id], type: 'radio', checked: id === skin(), click: () => setSkin(id) })) },
+    { label: t().traySkin(t().skins[skin()]), click: () => void pickSkin() },
     ...addonItems(),
     ...(app.isPackaged ? [{ label: t().trayLogin, type: 'checkbox', checked: !!login, click: (i) => { app.setLoginItemSettings({ openAtLogin: i.checked }); saveSettings({ openAtLogin: i.checked }); } }] : []),
     { type: 'separator' },
@@ -592,6 +597,7 @@ function controlFromStdin() {
     else if (m.cmd === 'voiceEvent') voiceEvent(m.ev);
     else if (m.cmd === 'openWake') openWakeWindow();
     else if (m.cmd === 'skin') setSkin(String(m.id));
+    else if (m.cmd === 'skinPick') await pickSkin();
     else if (m.cmd === 'shot') fs.writeFileSync(String(m.file), (await target(m).webContents.capturePage()).toPNG());
   });
 }
