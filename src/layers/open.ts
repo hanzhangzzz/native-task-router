@@ -85,6 +85,9 @@ const PROMPT_PATTERNS: RegExp[] = [
   /↑\/↓ to navigate/,
 ];
 const NUMBERED_CHOICE = [/^\s*[❯›>]?\s*1\.\s+\S/m, /^\s*[❯›>]?\s*2\.\s+\S/m];
+// 编号兜底必须看到原生光标（❯/›）落在某个编号行上：AI 正文里的编号列表同样以"1."开头，
+// 没有光标就是正文，不是可交互的框（2026-10-30 手机端把正文选项当审批框、点了没反应的误报修复）。
+const CURSOR_OPTION = /^\s*[❯›]\s*\d\.\s+\S/m;
 // Codex 空输入行的占位提示；其它未收录的占位会被当成草稿（误拦，安全方向）。
 const PLACEHOLDERS = /^(?:Ask Codex to do anything|Write tests for @|Improve documentation in @|Summarize recent commits|Explain this codebase|Find and fix a bug in @|Use \/skills|Implement \{feature\})/;
 
@@ -94,7 +97,7 @@ export function approvalPrompt(tail: string): string | null {
       && /^\s*[❯›>]?\s*Use session directory \(/m.test(tail)
       && /^\s*[❯›>]?\s*Use current directory \(/m.test(tail)) return '屏幕停在原生工作目录选择框';
   if (PROMPT_PATTERNS.some((p) => p.test(tail))) return '屏幕停在审批/选择框';
-  if (NUMBERED_CHOICE.every((p) => p.test(tail))) return '屏幕出现编号选项框';
+  if (NUMBERED_CHOICE.every((p) => p.test(tail)) && CURSOR_OPTION.test(tail)) return '屏幕出现编号选项框';
   return null;
 }
 
