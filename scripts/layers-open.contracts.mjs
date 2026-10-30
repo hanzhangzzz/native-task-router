@@ -74,6 +74,11 @@ check('屏幕: Codex 审批框被识别', approvalPrompt(CODEX_APPROVAL) !== nul
 check('屏幕: Claude 草稿被识别', pendingDraft(CLAUDE_DRAFT) !== null);
 check('屏幕: Codex 草稿被识别', pendingDraft(CODEX_DRAFT) !== null);
 check('屏幕: 仅编号选项也被拦(无关键词的菜单)', approvalPrompt('Select model\n❯ 1. Opus\n  2. Haiku') !== null);
+check('屏幕: 光标停在第 3 项也拦', approvalPrompt('Select model\n  1. Opus\n  2. Haiku\n❯ 3. Sonnet') !== null);
+// 2026-10-30 误报修复：AI 正文末尾的编号列表（无光标）不是选项框——手机端曾把它当审批框，
+// 渲染可点的假选项，点了往终端空按 ↓/Enter 六秒后报"按键没有生效"。
+check('屏幕: 正文编号列表不拦(2026-10-30 手机误报)', approvalPrompt('三个点请你定：\n1. 试听一遍：建议戴耳机。\n2. 冰山那一镜要不要加强：觉得够用就不动。\n3. 发不发由你定。') === null);
+check('屏幕: 单条编号行不拦', approvalPrompt('步骤如下\n1. 先跑 npm test\n❯') === null);
 check('shortName', shortName('帮我 看看 "foo/bar" 的 CI!!') === '帮我-看看-foo-bar-的-CI' && shortName('???') === 'task');
 
 // ---- 假实现 ----
